@@ -10,6 +10,10 @@ export type BtwSplit = "right" | "down";
 
 export type BtwConfig = {
 	autoSubmit: boolean;
+	/** Share the parent session id as the outbound prompt_cache_key. */
+	shareKey: boolean;
+	/** Share the parent session id as the outbound session_id header. */
+	shareHeader: boolean;
 	model: string | null;
 	thinking: BtwThinkingLevel | null;
 	tools: BtwToolMode;
@@ -18,6 +22,8 @@ export type BtwConfig = {
 
 export const DEFAULT_CONFIG: Readonly<BtwConfig> = Object.freeze({
 	autoSubmit: false,
+	shareKey: false,
+	shareHeader: false,
 	model: null,
 	thinking: null,
 	tools: "inherit",
@@ -39,6 +45,16 @@ export function parseConfig(value: unknown): BtwConfig {
 	if ("autoSubmit" in value) {
 		if (typeof value.autoSubmit !== "boolean") throw new Error("autoSubmit must be true or false");
 		config.autoSubmit = value.autoSubmit;
+	}
+	if ("shareKey" in value) {
+		if (typeof value.shareKey !== "boolean") throw new Error("shareKey must be true or false");
+		config.shareKey = value.shareKey;
+	}
+	if ("shareHeader" in value) {
+		if (typeof value.shareHeader !== "boolean") {
+			throw new Error("shareHeader must be true or false");
+		}
+		config.shareHeader = value.shareHeader;
 	}
 	if ("model" in value) {
 		if (value.model !== null && (typeof value.model !== "string" || !isModelName(value.model))) {
@@ -70,6 +86,8 @@ export function parseConfig(value: unknown): BtwConfig {
 export function formatConfig(config: BtwConfig): string {
 	return [
 		`auto-submit: ${config.autoSubmit ? "on" : "off"}`,
+		`share-key: ${config.shareKey ? "on" : "off"}`,
+		`share-header: ${config.shareHeader ? "on" : "off"}`,
 		`model: ${config.model ?? "inherit"}`,
 		`thinking: ${config.thinking ?? "inherit"}`,
 		`tools: ${config.tools}`,
@@ -78,7 +96,7 @@ export function formatConfig(config: BtwConfig): string {
 }
 
 export const CONFIG_COMMAND_USAGE =
-	"/btw config [auto-submit on|off | model inherit|provider/model | thinking inherit|off|minimal|low|medium|high|xhigh|max | tools inherit|all|read-only|none | split right|down | reset]";
+	"/btw config [auto-submit on|off | share-key on|off | share-header on|off | model inherit|provider/model | thinking inherit|off|minimal|low|medium|high|xhigh|max | tools inherit|all|read-only|none | split right|down | reset]";
 
 export type ConfigCommandResult = {
 	action: "show" | "save" | "reset";
@@ -98,6 +116,14 @@ export function applyConfigCommand(current: BtwConfig, input: string): ConfigCom
 		case "auto-submit":
 			if (value !== "on" && value !== "off") throw new Error(CONFIG_COMMAND_USAGE);
 			config.autoSubmit = value === "on";
+			break;
+		case "share-key":
+			if (value !== "on" && value !== "off") throw new Error(CONFIG_COMMAND_USAGE);
+			config.shareKey = value === "on";
+			break;
+		case "share-header":
+			if (value !== "on" && value !== "off") throw new Error(CONFIG_COMMAND_USAGE);
+			config.shareHeader = value === "on";
 			break;
 		case "model":
 			if (value !== "inherit" && !isModelName(value)) throw new Error(CONFIG_COMMAND_USAGE);

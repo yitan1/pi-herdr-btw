@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
 	buildSessionContext,
@@ -153,6 +153,62 @@ async function configureChild(
 			return { systemPrompt: payload.parentSystemPrompt as string };
 		}
 		return { systemPrompt: `${event.systemPrompt}\n\n${SIDE_PANE_INSTRUCTIONS}` };
+	});
+
+	// Local experiment: share outbound cache/session hints, never the local session identity.
+	// `share-header` = session_id request header, `share-key` = prompt_cache_key body field.
+	// Both off by default; PI_HERDR_BTW_SHARE_CACHE_KEY=0 disables both.
+	pi.on("before_provider_headers", (event, ctx) => {
+		if (!payload) return;
+		const enabled = payload.config.shareHeader === true
+			&& process.env.PI_HERDR_BTW_SHARE_CACHE_KEY !== "0"
+			&& cache.mode === "native"
+			&& ctx.model?.api === "openai-responses";
+		if (!enabled) {
+			ctx.ui.setWidget("herdr-btw-session-header", ["Session header: unchanged"]);
+			return;
+		}
+		// Sub2API gives session-id precedence over session_id. Do not silently
+		// override an explicitly configured conflicting higher-priority header.
+		const conflict = Object.entries(event.headers).some(([name, value]) =>
+			name.toLowerCase() === "session-id" && typeof value === "string"
+			&& value.trim() !== "" && value.trim() !== payload.parentSessionId);
+		if (conflict) {
+			ctx.ui.setWidget("herdr-btw-session-header", ["Session header: unchanged (conflicting session-id header)"]);
+			return;
+		}
+		for (const name of Object.keys(event.headers)) {
+			if (name.toLowerCase() === "session_id") event.headers[name] = null;
+		}
+		event.headers["session_id"] = payload.parentSessionId;
+		ctx.ui.setWidget("herdr-btw-session-header", ["Session header: parent (experimental)"]);
+	});
+
+	pi.on("before_provider_request", (event, ctx) => {
+		if (!payload) return;
+		const body = event.payload;
+		const supportedApi = ctx.model?.api === "openai-responses" || ctx.model?.api === "openai-codex-responses";
+		const share = payload.config.shareKey === true
+			&& process.env.PI_HERDR_BTW_SHARE_CACHE_KEY !== "0"
+			&& cache.mode === "native"
+			&& supportedApi
+			&& body !== null && typeof body === "object"
+			&& "prompt_cache_key" in body
+			&& typeof body.prompt_cache_key === "string"
+			&& body.prompt_cache_key.length > 0;
+		ctx.ui.setWidget("herdr-btw-cache-key", [
+			`Cache path: ${cache.mode}${cache.reason ? ` — ${cache.reason}` : ""}`,
+			`Cache key: ${share ? "parent (experimental)" : "unchanged"}; actual hits: see cache usage`,
+		]);
+		if (!share) return;
+		const patchedBody = {
+			...body,
+			prompt_cache_key: Array.from(payload.parentSessionId).slice(0, 64).join(""),
+		};
+		pi.events.emit("herdr-btw:cache-key-patched", {
+			keySha256: createHash("sha256").update(JSON.stringify(patchedBody.prompt_cache_key)).digest("hex"),
+		});
+		return patchedBody;
 	});
 
 	pi.on("context", (event) => {
@@ -407,12 +463,12 @@ export async function registerBtwExtension(
 		}
 	});
 
-	pi.registerCommand("btw", {
-		// Pi has no argumentHint field for extension commands (only builtins and
-		// prompt templates); the TUI renders template hints as "hint — description",
-		// so we bake the same shape into the description.
-		description: "[question] — Open a Herdr side thread, or use ask, config, merge, help",
-		handler: async (args, ctx) => {
+	type BtwShareOverride = Pick<BtwConfig, "shareKey" | "shareHeader">;
+	const handleBtw = async (
+		args: string,
+		ctx: ExtensionCommandContext,
+		override?: BtwShareOverride,
+	): Promise<void> => {
 			sessionCtx = ctx;
 			notifyFn = (message, type) => ctx.ui.notify(message, type);
 			const route = parseBtwCommand(args);
@@ -486,7 +542,8 @@ export async function registerBtwExtension(
 
 			let payloadPath: string | undefined;
 			try {
-				const config: BtwConfig = await configStore.load();
+				const storedConfig: BtwConfig = await configStore.load();
+				const config: BtwConfig = override ? { ...storedConfig, ...override } : storedConfig;
 				await store.removeStale();
 				const createdAt = new Date().toISOString();
 				const sessionId = ctx.sessionManager.getSessionId();
@@ -597,7 +654,24 @@ export async function registerBtwExtension(
 				const message = error instanceof Error ? error.message : String(error);
 				ctx.ui.notify(`/btw failed: ${message.slice(0, 500)}`, "error");
 			}
-		},
+	};
+
+	// /btw uses the saved defaults. The numbered aliases force only the
+	// cache-sharing switches and leave model, tools, split, and auto-submit intact.
+	pi.registerCommand("btw", {
+		// Pi has no argumentHint field for extension commands (only builtins and
+		// prompt templates); the TUI renders template hints as "hint — description",
+		// so we bake the same shape into the description.
+		description: "[question] — Open a Herdr side thread, or use ask, config, merge, help",
+		handler: (args, ctx) => handleBtw(args, ctx),
+	});
+	pi.registerCommand("btw1", {
+		description: "[question] — Open btw with shared cache key only",
+		handler: (args, ctx) => handleBtw(args, ctx, { shareKey: true, shareHeader: false }),
+	});
+	pi.registerCommand("btw2", {
+		description: "[question] — Open btw with shared cache key and header",
+		handler: (args, ctx) => handleBtw(args, ctx, { shareKey: true, shareHeader: true }),
 	});
 }
 

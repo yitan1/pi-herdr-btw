@@ -143,6 +143,8 @@ export function isBtwPayload(value: unknown): value is BtwPayload {
 		!!payload.config &&
 		typeof payload.config === "object" &&
 		typeof payload.config.autoSubmit === "boolean" &&
+		(payload.config.shareKey === undefined || typeof payload.config.shareKey === "boolean") &&
+		(payload.config.shareHeader === undefined || typeof payload.config.shareHeader === "boolean") &&
 		(payload.config.model === null ||
 			(typeof payload.config.model === "string" && isModelName(payload.config.model))) &&
 		(payload.config.thinking === null ||

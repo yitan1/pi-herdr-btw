@@ -6,10 +6,12 @@ export type BtwRoute =
 	| { kind: "help" };
 
 export const HELP_TEXT = `/btw usage:
-/btw                        open an empty side pane
+/btw                        open an empty side pane using saved defaults
 /btw <question...>          open a side pane with a draft question
+/btw1 <question...>         open btw with shared cache key only
+/btw2 <question...>         open btw with shared cache key and session header
 /btw ask <question...>      explicit form for questions starting with a reserved word
-/btw config [...]           show or change defaults (auto-submit, model, thinking, tools, split, reset)
+/btw config [...]           show or change defaults (auto-submit, share-key, share-header, model, thinking, tools, split, reset)
 /btw merge <prompt...>      fold this side thread into the parent and continue with the prompt
 /btw help                   show this grammar`;
 
