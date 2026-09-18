@@ -20,6 +20,7 @@ test("config commands expose a small validated settings interface", () => {
 	config = applyConfigCommand(config, "split down").config;
 
 	assert.deepEqual(config, {
+		...DEFAULT_CONFIG,
 		autoSubmit: true,
 		model: "anthropic/claude-sonnet",
 		thinking: "xhigh",
@@ -55,4 +56,22 @@ test("ConfigStore persists private config and resets it", async (t) => {
 	if (process.platform !== "win32") assert.equal((await lstat(path)).mode & 0o777, 0o600);
 	assert.deepEqual(await store.reset(), DEFAULT_CONFIG);
 	assert.deepEqual(await store.load(), DEFAULT_CONFIG);
+});
+
+test("cache sharing is opt-in, validated, configurable and resettable", () => {
+	assert.equal(parseConfig({}).shareKey, false);
+	assert.equal(parseConfig({}).shareHeader, false);
+	let config = applyConfigCommand({ ...DEFAULT_CONFIG }, "share-key on").config;
+	config = applyConfigCommand(config, "share-header on").config;
+	assert.equal(config.shareKey, true);
+	assert.equal(config.shareHeader, true);
+	assert.match(formatConfig(config), /share-key: on/);
+	assert.match(formatConfig(config), /share-header: on/);
+	assert.equal(applyConfigCommand(config, "share-key off").config.shareHeader, true);
+	assert.equal(applyConfigCommand(config, "share-header off").config.shareKey, true);
+	assert.deepEqual(applyConfigCommand(config, "reset").config, DEFAULT_CONFIG);
+	assert.throws(() => parseConfig({ shareKey: "true" }), /shareKey/);
+	assert.throws(() => parseConfig({ shareHeader: 1 }), /shareHeader/);
+	assert.throws(() => applyConfigCommand(config, "share-key yes"), /btw config/);
+	assert.throws(() => applyConfigCommand(config, "share-header yes"), /btw config/);
 });

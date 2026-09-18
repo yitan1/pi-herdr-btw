@@ -1,3 +1,9 @@
+> **Custom fork:** Maintained on the `custom` branch. Install with
+> `pi install git:github.com/yitan1/pi-herdr-btw@v0.3.1-custom.1`.
+> Adds `/btw1` and `/btw2` opt-in cache-sharing experiments.
+> See [LOCAL_PATCH.md](LOCAL_PATCH.md) for behavior, migration and maintenance.
+> The upstream README follows; its npm install command installs upstream, not this fork.
+
 # pi-herdr-btw
 
 A [Pi](https://github.com/earendil-works/pi) extension inspired by [Claude Code's `/btw`](https://code.claude.com/docs/en/interactive-mode#side-questions-with-/btw). It opens a tool-enabled side conversation in a focused [Herdr](https://github.com/ogulcancelik/herdr) pane without changing the parent transcript.

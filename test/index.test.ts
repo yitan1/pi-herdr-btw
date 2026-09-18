@@ -178,6 +178,7 @@ async function createHarness(
 	const timers: Array<ReturnType<typeof setInterval>> = [];
 	const originalSetInterval = globalThis.setInterval;
 	const pi = {
+		events: { emit: () => undefined },
 		registerCommand(name: string, command: Command) {
 			commands.set(name, command);
 		},
@@ -456,6 +457,7 @@ test("parent command applies configured model, thinking, tools, and split", asyn
 		const store = new FakeStore();
 		const configStore = new FakeConfigStore();
 		configStore.config = {
+			...DEFAULT_CONFIG,
 			autoSubmit: true,
 			model: "anthropic/claude-haiku",
 			thinking: "low",
@@ -982,3 +984,70 @@ test("child merge refuses to stack a second request on a pending one", async () 
 		assert.match(notifications.at(-1)?.message ?? "", /already pending/);
 	});
 });
+
+test("btw aliases override sharing for one launch without changing saved preferences", async () => {
+	await withParentEnvironment(async () => {
+		const store = new FakeStore();
+		const configStore = new FakeConfigStore();
+		configStore.config = { ...DEFAULT_CONFIG, split: "down", thinking: "low" };
+		const harness = await createHarness(store, herdrExec(), configStore);
+		try {
+			for (const [command, shareKey, shareHeader] of [
+				["btw", false, false], ["btw1", true, false], ["btw2", true, true],
+			] as const) {
+				assert.ok(harness.commands.has(command));
+				await harness.commands.get(command)!.handler("question", createCommandContext());
+				assert.deepEqual(store.created.at(-1)?.config, { ...configStore.config, shareKey, shareHeader });
+			}
+			assert.equal(configStore.config.shareKey, false);
+			assert.equal(configStore.config.shareHeader, false);
+			assert.equal(configStore.saved.length, 0);
+		} finally { harness.cleanup(); }
+	});
+});
+
+for (const scenario of [
+	{ name: "defaults leave hints unchanged", key: false, header: false, api: "openai-responses", expectedKey: false, expectedHeader: false },
+	{ name: "key only", key: true, header: false, api: "openai-responses", expectedKey: true, expectedHeader: false },
+	{ name: "key and header", key: true, header: true, api: "openai-responses", expectedKey: true, expectedHeader: true },
+	{ name: "Codex supports key but not header override", key: true, header: true, api: "openai-codex-responses", expectedKey: true, expectedHeader: false },
+	{ name: "unsupported API", key: true, header: true, api: "anthropic-messages", expectedKey: false, expectedHeader: false },
+	{ name: "fallback context", key: true, header: true, api: "openai-responses", fallback: true, expectedKey: false, expectedHeader: false },
+	{ name: "environment kill switch", key: true, header: true, api: "openai-responses", disabled: true, expectedKey: false, expectedHeader: false },
+	{ name: "conflicting session-id", key: true, header: true, api: "openai-responses", conflict: true, expectedKey: true, expectedHeader: false },
+	{ name: "absent cache key is not injected", key: true, header: false, api: "openai-responses", absentKey: true, expectedKey: false, expectedHeader: false },
+]) {
+	test(`cache sharing: ${scenario.name}`, async () => {
+		const old = process.env.PI_HERDR_BTW_SHARE_CACHE_KEY;
+		if (scenario.disabled) process.env.PI_HERDR_BTW_SHARE_CACHE_KEY = "0";
+		else delete process.env.PI_HERDR_BTW_SHARE_CACHE_KEY;
+		try {
+			await withChildEnvironment("/tmp/pi-herdr-btw-test/launch-123/payload.json", async () => {
+				const store = new FakeStore();
+				store.readValue = fixturePayload({ config: { ...DEFAULT_CONFIG, shareKey: scenario.key, shareHeader: scenario.header } });
+				const harness = await createHarness(store, herdrExec());
+				try {
+					const ctx = {
+						model: { provider: "test-provider", id: scenario.fallback ? "other" : "test-model", api: scenario.api },
+						ui: { setWidget: () => undefined },
+					};
+					await harness.emit("before_agent_start", { systemPrompt: "child" }, ctx);
+					const body = scenario.absentKey ? { input: "question" } : { input: "question", prompt_cache_key: "child-key" };
+					const [result] = await harness.emit("before_provider_request", { payload: body }, ctx);
+					if (scenario.expectedKey) {
+						assert.deepEqual(result, { ...body, prompt_cache_key: store.readValue.parentSessionId });
+					} else assert.equal(result, undefined);
+					assert.equal(body.prompt_cache_key, scenario.absentKey ? undefined : "child-key");
+					const headers: Record<string, string | null> = { session_id: "child-session" };
+					if (scenario.conflict) headers["session-id"] = "explicit-session";
+					await harness.emit("before_provider_headers", { headers }, ctx);
+					assert.equal(headers.session_id, scenario.expectedHeader ? store.readValue.parentSessionId : "child-session");
+					if (scenario.conflict) assert.equal(headers["session-id"], "explicit-session");
+				} finally { harness.cleanup(); }
+			});
+		} finally {
+			if (old === undefined) delete process.env.PI_HERDR_BTW_SHARE_CACHE_KEY;
+			else process.env.PI_HERDR_BTW_SHARE_CACHE_KEY = old;
+		}
+	});
+}
