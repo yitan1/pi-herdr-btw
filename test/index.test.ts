@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG, type BtwConfig } from "../src/config.ts";
+import { captureRequest } from "../src/inheritance-check.ts";
 import type { BtwPayload } from "../src/core.ts";
 import {
 	MERGE_CUSTOM_TYPE,
@@ -1139,6 +1140,75 @@ test("snapshot initialization failure blocks user input and the auto-submit sent
    assert.ok(input.some((result: any) => result?.action === "handled"));
    await harness.commands.get("btw")!.handler("--launch-draft", ctx);
    assert.deepEqual(harness.sentUserMessages, []);
+  } finally { harness.cleanup(); }
+ });
+});
+
+
+test("parent /btw check is local, aliases carry the current request baseline, other sessions do not", async () => {
+ await withParentEnvironment(async () => {
+  const store = new FakeStore();
+  const harness = await createHarness(store, herdrExec());
+  try {
+   const ctx = createCommandContext();
+   Object.assign(ctx.model, { api: "openai-responses" });
+   await harness.commands.get("btw")!.handler("check", ctx);
+   assert.match(ctx.notifications.at(-1)!.message, /无父请求基准/);
+   assert.equal(harness.execCalls.length, 0);
+   await harness.emit("before_provider_request", { payload: { model: "test-model", input: [{ role: "user", content: "parent question" }], tools: [] } }, ctx);
+   for (const command of ["btw", "btw1", "btw2"]) {
+    await harness.commands.get(command)!.handler("question", ctx);
+    assert.equal(store.created.at(-1)!.parentRequestFingerprint?.inputHashes.length, 1);
+   }
+   await harness.commands.get("btw")!.handler("check", ctx);
+   assert.match(ctx.notifications.at(-1)!.message, /采集耗时/);
+   Object.assign(ctx.sessionManager, { getSessionId: () => "another-session" });
+   await harness.commands.get("btw")!.handler("question", ctx);
+   assert.equal(store.created.at(-1)!.parentRequestFingerprint, undefined);
+   assert.deepEqual(harness.sentUserMessages, []);
+  } finally { harness.cleanup(); }
+ });
+});
+
+test("child checks its first request only, /btw check makes no request and changes no payload", async () => {
+ await withChildEnvironment("/tmp/pi-herdr-btw-test/launch-123/payload.json", async () => {
+  const store = new FakeStore();
+  const body = { model: "test-model", instructions: "parent system prompt", input: [{ role: "user", content: "parent question" }], tools: [] };
+  store.readValue = fixturePayload({ parentRequestFingerprint: captureRequest(body, { sessionId: "12345678-1234-1234-1234-123456789abc", provider: "test-provider", model: "test-model", api: "openai-responses" }) });
+  const harness = await createHarness(store, herdrExec());
+  try {
+   const ctx = createCommandContext();
+   Object.assign(ctx.model, { api: "openai-responses" });
+   Object.assign(ctx.ui, { setWidget: () => undefined });
+   await harness.commands.get("btw")!.handler("check", ctx);
+   assert.match(ctx.notifications.at(-1)!.message, /待首次请求/);
+   await harness.emit("before_agent_start", { systemPrompt: "child system prompt" }, ctx);
+   const before = JSON.stringify(body);
+   await harness.emit("before_provider_request", { payload: body }, ctx);
+   assert.equal(JSON.stringify(body), before);
+   await harness.commands.get("btw")!.handler("check", ctx);
+   const report = ctx.notifications.at(-1)!.message;
+   assert.match(report, /可观测前缀匹配/);
+   await harness.emit("before_provider_request", { payload: { ...body, instructions: "later changed" } }, ctx);
+   await harness.commands.get("btw")!.handler("check", ctx);
+   assert.equal(ctx.notifications.at(-1)!.message, report);
+   assert.deepEqual(harness.sentUserMessages, []);
+   assert.deepEqual(harness.execCalls, []);
+  } finally { harness.cleanup(); }
+ });
+});
+
+test("tampered parent context is blocked before submission", async () => {
+ await withChildEnvironment("/tmp/pi-herdr-btw-test/launch-123/payload.json", async () => {
+  const store = new FakeStore();
+  store.readValue = fixturePayload();
+  store.readValue.parentSystemPrompt = "tampered";
+  const harness = await createHarness(store, herdrExec());
+  try {
+   const ctx = createCommandContext();
+   const result = await harness.emit("input", { text: "hello" }, ctx);
+   assert.ok(result.some((r: any) => r?.action === "handled"));
+   assert.match(ctx.notifications.at(-1)!.message, /integrity check failed/);
   } finally { harness.cleanup(); }
  });
 });

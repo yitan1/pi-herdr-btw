@@ -147,3 +147,36 @@ protocol still uses the existing temporary payload mailbox.
 Disable for future launches with `/btw config persistent off`. Existing side
 threads and saved data are not changed. Persistent mode supports Observation Pack
 object inheritance only, not a generic migration of all SoL-Pi runtime state.
+
+### Inheritance diagnostics
+
+`/btw check` displays diagnostics locally without a model call. In a parent it
+reports whether a recent request baseline exists; in a child it shows parent-data
+integrity, Observation Pack installation status, and the first-request comparison.
+`check` is now a reserved first word: use `/btw ask check ...` for a question.
+
+The parent fingerprints each supported request and retains only its latest
+baseline in memory. Launch payloads contain hashes, not an extra copy of request
+text. Switching/reloading sessions clears the baseline; after `/reload`, send a
+normal parent message before opening a child if you want a comparison baseline.
+The child automatically checks its first request only. Subsequent `/btw check`
+commands show that saved result, not a fresh validation of later turns.
+
+Currently supported: OpenAI Responses and Codex Responses with explicit nonempty
+`input` arrays. Server-side conversation/previous-response references and unknown
+formats report unverified. Checks cover provider/API/model identity, system and
+developer prompt material, complete ordered tool definitions, and the longest
+matching input-item prefix. Object keys are canonicalized; arrays and message
+fields are preserved. Different cache keys alone do not create a prompt mismatch.
+
+Results are observations at BTW's `before_provider_request` hook, NOT a guarantee
+of the final wire payload: later extension hooks can still change it. The baseline
+covers the parent's last request, not the assistant/tool messages generated after
+that request. Missing baselines, fallback document mode, unsupported requests and
+mismatches are reported explicitly; they do not alter cache sharing or block an
+otherwise valid conversation. Parent-data integrity failure still blocks input.
+Actual cache hits must be confirmed from provider usage.
+
+The display reports fingerprint/comparison time, excluding snapshot disk copying,
+payload integrity verification, and network latency. Diagnostics themselves do
+not send additional API requests.

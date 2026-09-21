@@ -1,3 +1,4 @@
+import { fingerprint, isRequestFingerprint, type RequestFingerprint } from "./inheritance-check.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
@@ -42,6 +43,8 @@ export type BtwPayload = {
 	parentActiveTools: string[];
 	/** Parent thinking level at launch. */
 	parentThinkingLevel: string;
+	parentRequestFingerprint?: RequestFingerprint;
+	parentContextHash?: string;
 	/** Native, compaction-aware parent messages. */
 	messages: AgentMessage[];
 	draftQuestion: string;
@@ -56,6 +59,7 @@ export type CreatePayloadOptions = {
 	parentSystemPrompt: string | null;
 	parentActiveTools: string[];
 	parentThinkingLevel: string;
+	parentRequestFingerprint?: RequestFingerprint;
 	messages: AgentMessage[];
 	draftQuestion: string;
 	config: BtwConfig;
@@ -100,6 +104,8 @@ export type LaunchOutcome = "success" | "failed" | "ambiguous";
 export function createPayload(options: CreatePayloadOptions): BtwPayload {
 	return {
 		version: PAYLOAD_VERSION,
+		...(options.parentRequestFingerprint ? { parentRequestFingerprint: options.parentRequestFingerprint } : {}),
+		parentContextHash: fingerprint({ system: options.parentSystemPrompt, messages: options.messages }),
 		createdAt: options.createdAt,
 		launchId: options.launchId ?? randomUUID(),
 		capability: options.capability ?? randomBytes(32).toString("hex"),
@@ -120,6 +126,8 @@ export function isBtwPayload(value: unknown): value is BtwPayload {
 	const payload = value as Partial<BtwPayload>;
 	return (
 		payload.version === PAYLOAD_VERSION &&
+		(payload.parentRequestFingerprint === undefined || (isRequestFingerprint(payload.parentRequestFingerprint) && payload.parentRequestFingerprint.sessionId === payload.parentSessionId)) &&
+		(payload.parentContextHash === undefined || (typeof payload.parentContextHash === "string" && /^[a-f0-9]{64}$/.test(payload.parentContextHash))) &&
 		typeof payload.createdAt === "string" &&
 		typeof payload.launchId === "string" &&
 		payload.launchId.length > 0 &&

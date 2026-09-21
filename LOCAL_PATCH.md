@@ -108,3 +108,13 @@ Snapshot files are independent copies with a SHA-256 manifest, private modes,
 regular-file/no-symlink validation, and a 512 MiB total bound. Initialization
 checks the actual child session directory and refuses conflicting existing objects.
 No automatic persistent-data cleanup or stand-alone BTW resume is provided yet.
+
+## Request inheritance diagnostics
+
+Parent request fingerprints are memory-only and session-bound. The optional
+payload fields `parentRequestFingerprint` and `parentContextHash` are compatible
+with existing version-4 payloads. Children check data integrity at load and compare
+the first supported request against the parent baseline. `/btw check` is local.
+No final-hook ordering guarantee is assumed: reports explicitly describe BTW's
+observation point. The diagnostic does not mutate provider bodies or cache policy.
+See README limitations before interpreting a match as a cache-hit guarantee.

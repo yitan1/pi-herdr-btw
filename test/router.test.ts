@@ -19,6 +19,7 @@ test("only exact reserved first words route to subcommands", () => {
 		text: "use the summary",
 	});
 	assert.deepEqual(parseBtwCommand("help"), { kind: "help" });
+	assert.deepEqual(parseBtwCommand("check"), { kind: "check" });
 });
 
 test("unknown first words remain questions", () => {
@@ -39,7 +40,7 @@ test("/btw ask is the escape hatch for reserved words", () => {
 });
 
 test("help text covers the full grammar", () => {
-	for (const token of ["ask", "config", "merge", "help"]) {
+	for (const token of ["ask", "config", "merge", "help", "check"]) {
 		assert.match(HELP_TEXT, new RegExp(`/btw ${token}`));
 	}
 });

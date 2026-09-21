@@ -1,3 +1,4 @@
+import { captureRequest, compareRequests, fingerprint, formatInheritanceReport, type RequestFingerprint, type InheritanceReport } from "./src/inheritance-check.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -111,6 +112,10 @@ async function configureChild(
 
 	try {
 		payload = await store.read(payloadPath);
+		if (payload.parentContextHash && payload.parentContextHash !== fingerprint({ system: payload.parentSystemPrompt, messages: payload.messages })) {
+			payload = undefined;
+			throw new Error("Parent context integrity check failed");
+		}
 	} catch (error) {
 		payloadError = error instanceof Error ? error.message : String(error);
 	}
@@ -123,6 +128,14 @@ async function configureChild(
 		: undefined;
 
 	const cache: CacheMode = { mode: "fallback", reason: "not yet negotiated" };
+	let inheritanceReport: InheritanceReport | undefined;
+	let inheritanceChecked = false;
+	let observationStatus = payload?.config.persistent ? "快照对象：等待初始化" : "快照对象：未启用持久化";
+	function inheritanceSummary(): string {
+		const loaded = payload ? `父数据：已加载 ${payload.messages.length} 条消息（${payload.parentContextHash ? "完整性校验通过" : "旧 payload，无完整性指纹"}）` : "父数据：加载失败";
+		const baseline = payload?.parentRequestFingerprint;
+		return `${loaded}\n${observationStatus}${baseline ? `\n父请求基准：${baseline.capturedAt}（不覆盖其后新增内容）` : ""}\n${formatInheritanceReport(inheritanceReport)}`;
+	}
 	let widgetUi:
 		| { setWidget(name: string, lines: string[]): void; theme: { fg(color: string, text: string): string } }
 		| undefined;
@@ -190,6 +203,16 @@ async function configureChild(
 	pi.on("before_provider_request", (event, ctx) => {
 		if (!payload) return;
 		const body = event.payload;
+		if (!inheritanceChecked) {
+			inheritanceChecked = true;
+			try {
+				const current = ctx.model ? captureRequest(body, { sessionId: ctx.sessionManager.getSessionId(), provider: ctx.model.provider, model: ctx.model.id, api: ctx.model.api }) : undefined;
+				inheritanceReport = compareRequests(payload.parentRequestFingerprint, current, cache.mode === "native");
+			} catch {
+				inheritanceReport = { status: "unsupported", matched: 0, parentItems: 0, checkMs: 0 };
+			}
+			ctx.ui.setWidget("herdr-btw-inheritance", inheritanceSummary().split("\n"));
+		}
 		const supportedApi = ctx.model?.api === "openai-responses" || ctx.model?.api === "openai-codex-responses";
 		const share = payload.config.shareKey === true
 			&& process.env.PI_HERDR_BTW_SHARE_CACHE_KEY !== "0"
@@ -256,6 +279,10 @@ async function configureChild(
 				return;
 			}
 			const route = parseBtwCommand(args);
+			if (route.kind === "check") {
+				ctx.ui.notify(inheritanceSummary(), "info");
+				return;
+			}
 			if (route.kind === "help") {
 				ctx.ui.notify(HELP_TEXT, "info");
 				return;
@@ -370,7 +397,8 @@ async function configureChild(
 	pi.on("session_start", async (event, ctx) => {
 		if (payload?.config.persistent) {
 			try {
-				await installParentObservations(payload.launchId, ctx.sessionManager.getSessionDir(), ctx.sessionManager.getSessionId());
+				const count = await installParentObservations(payload.launchId, ctx.sessionManager.getSessionDir(), ctx.sessionManager.getSessionId());
+				observationStatus = `快照对象：${count} 个已就绪`;
 			} catch (error) {
 				payloadError = `Observation snapshot initialization failed: ${error instanceof Error ? error.message : String(error)}`;
 				payload = undefined;
@@ -392,6 +420,7 @@ async function configureChild(
 
 		widgetUi = ctx.ui;
 		renderWidget();
+		ctx.ui.setWidget("herdr-btw-inheritance", inheritanceSummary().split("\n"));
 
 		// Auto-submit drafts are sent via the launch-draft sentinel instead of
 		// here: session_start fires before pi's initial render, and a message
@@ -426,6 +455,14 @@ export async function registerBtwExtension(
 	}
 
 	const configStore = options.configStore ?? new ConfigStore();
+	let parentRequestFingerprint: RequestFingerprint | undefined;
+	pi.on("before_provider_request", (event, ctx) => {
+		try {
+			parentRequestFingerprint = ctx.model ? captureRequest(event.payload, {
+				sessionId: ctx.sessionManager.getSessionId(), provider: ctx.model.provider, model: ctx.model.id, api: ctx.model.api,
+			}) : undefined;
+		} catch { parentRequestFingerprint = undefined; }
+	});
 
 	// --- Parent-side merge coordination ---------------------------------
 	let sessionCtx:
@@ -460,6 +497,7 @@ export async function registerBtwExtension(
 
 	pi.on("session_start", async (_event, ctx) => {
 		sessionCtx = ctx;
+		parentRequestFingerprint = undefined;
 		notifyFn = (message, type) => ctx.ui.notify(message, type);
 		// Recover pending merges bound to this session after reload/resume.
 		ensurePolling();
@@ -484,6 +522,11 @@ export async function registerBtwExtension(
 			sessionCtx = ctx;
 			notifyFn = (message, type) => ctx.ui.notify(message, type);
 			const route = parseBtwCommand(args);
+			if (route.kind === "check") {
+				const baseline = parentRequestFingerprint?.sessionId === ctx.sessionManager.getSessionId() ? parentRequestFingerprint : undefined;
+				ctx.ui.notify(baseline ? `父请求基准：${baseline.inputHashes.length} 项；采集耗时 ${baseline.captureMs.toFixed(2)} ms；时间 ${baseline.capturedAt}。在侧线程运行 /btw check 查看比较结果。` : "无父请求基准；需要父线程先发出一次受支持的请求。此命令不会调用模型。", "info");
+				return;
+			}
 
 			if (route.kind === "help") {
 				ctx.ui.notify(HELP_TEXT, "info");
@@ -595,6 +638,7 @@ export async function registerBtwExtension(
 						parentSystemPrompt,
 						parentActiveTools: activeTools,
 						parentThinkingLevel: thinkingLevel,
+						parentRequestFingerprint: parentRequestFingerprint?.sessionId === sessionId ? parentRequestFingerprint : undefined,
 						messages: sessionContext.messages,
 						draftQuestion,
 						config,

@@ -90,7 +90,7 @@ export async function preparePersistentSession(
 /** Install verified objects under the child's real identity before its first request. */
 export async function installParentObservations(
 	launchId: string, sessionDir: string | undefined, sessionId: string, agentDir = getAgentDir(),
-): Promise<void> {
+): Promise<number> {
 	const paths = persistentPaths(launchId, agentDir);
 	for (const path of [agentDir, join(agentDir, "btw-sessions"), paths.root, paths.snapshot, paths.sessions]) await directory(path);
 	if (!sessionDir || await realpath(sessionDir) !== await realpath(paths.sessions)) {
@@ -119,4 +119,5 @@ export async function installParentObservations(
 			if (!(await readObject(dest)).equals(data)) throw new Error(`Conflicting child observation: ${entry.name}`);
 		}
 	}
+	return manifest.length;
 }

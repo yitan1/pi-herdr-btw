@@ -3,7 +3,8 @@ export type BtwRoute =
 	| { kind: "ask"; question: string }
 	| { kind: "config"; args: string }
 	| { kind: "merge"; text: string }
-	| { kind: "help" };
+	| { kind: "help" }
+	| { kind: "check" };
 
 export const HELP_TEXT = `/btw usage:
 /btw                        open an empty side pane using saved defaults
@@ -13,11 +14,12 @@ export const HELP_TEXT = `/btw usage:
 /btw ask <question...>      explicit form for questions starting with a reserved word
 /btw config [...]           show or change defaults (persistent, auto-submit, share-key, share-header, model, thinking, tools, split, reset)
 /btw merge <prompt...>      fold this side thread into the parent and continue with the prompt
+/btw check                  show inheritance diagnostics without a model request
 /btw help                   show this grammar`;
 
 /**
  * Exact first-word routing. Only the reserved words `ask`, `config`, `merge`,
- * and `help` are subcommands; any other first word keeps the whole input as a
+ * `check`, and `help` are subcommands; any other first word keeps the whole input as a
  * question. `/btw ask ...` is the escape hatch for questions that begin with a
  * reserved word.
  */
@@ -36,6 +38,8 @@ export function parseBtwCommand(input: string): BtwRoute {
 			return { kind: "config", args: rest };
 		case "merge":
 			return { kind: "merge", text: rest };
+		case "check":
+			return { kind: "check" };
 		case "help":
 			return { kind: "help" };
 		default:
