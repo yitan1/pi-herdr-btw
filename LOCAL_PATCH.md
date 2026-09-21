@@ -126,6 +126,8 @@ second confirmation. The top action deletes all listed Ready records; each is
 rechecked under its lifecycle lock. New child sessions
 record running/closed lifecycle metadata; shutdown preserves durable files.
 Only confirmed closed records with a dead local PID and no pending merge are
-eligible. Legacy/uncertain records are skipped. A shared per-launch lock protects
+eligible for ordinary/bulk deletion. Other rows offer individual Force delete
+with one risk confirmation in the same menu. Force bypasses state eligibility,
+not path safety or lifecycle locks. A shared per-launch lock protects
 startup and final deletion checks. Manual deletion removes only the persistent
 launch directory; mailbox TTL cleanup and parent runtime data are unchanged.

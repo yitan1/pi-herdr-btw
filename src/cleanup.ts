@@ -148,11 +148,13 @@ export async function listCleanupEntries(agentDir = getAgentDir()): Promise<Clea
 	}
 	return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
-export async function deleteCleanupEntry(launchId: string, agentDir = getAgentDir()): Promise<void> {
+export async function deleteCleanupEntry(launchId: string, agentDir = getAgentDir(), force = false): Promise<void> {
 	const root = await checkedRoot(launchId, agentDir);
 	await withLock(root, async () => {
 		const current = await inspect(launchId, agentDir, true);
-		if (current.status !== "Ready") throw new Error(`Cleanup refused: ${current.status}${current.reason ? ` (${current.reason})` : ""}`);
+		if (!force && current.status !== "Ready") throw new Error(`Cleanup refused: ${current.status}${current.reason ? ` (${current.reason})` : ""}`);
+		// Force bypasses lifecycle/merge eligibility, never filesystem safety or the lock.
+		if (force) await treeBytes(root);
 		// Move out of the launch namespace while holding its lifecycle lock.
 		const tombstone = join(agentDir, "btw-sessions", `.deleting-${randomUUID()}`);
 		await rename(root, tombstone);
@@ -166,8 +168,8 @@ export async function showCleanup(ctx: ExtensionCommandContext): Promise<void> {
 		if (!entries.length) { ctx.ui.notify("No persistent BTW records.", "info"); return; }
 		const ready = entries.filter((entry) => entry.status === "Ready");
 		const deleteAll = `Delete all Ready (${ready.length} records, ${(ready.reduce((sum, entry) => sum + entry.bytes, 0) / 1024 / 1024).toFixed(2)} MiB)`;
-		const labels = entries.map((entry) => `${entry.status === "Ready" ? "Delete" : "Keep"} | ${entry.createdAt} | ${(entry.bytes / 1024 / 1024).toFixed(2)} MiB | ${entry.status} | ${entry.launchId}`);
-		const selected = await ctx.ui.select("BTW cleanup — delete immediately (Esc to cancel)", ready.length ? [deleteAll, ...labels] : labels);
+		const labels = entries.map((entry) => `${entry.status === "Ready" ? "Delete" : "Force delete"} | ${entry.createdAt} | ${(entry.bytes / 1024 / 1024).toFixed(2)} MiB | ${entry.status} | ${entry.launchId}`);
+		const selected = await ctx.ui.select("BTW cleanup — Ready: immediate; Force: confirm (Esc to cancel)", ready.length ? [deleteAll, ...labels] : labels);
 		if (selected === undefined) return;
 		if (ready.length && selected === deleteAll) {
 			let deleted = 0;
@@ -181,8 +183,11 @@ export async function showCleanup(ctx: ExtensionCommandContext): Promise<void> {
 		}
 		const entry = entries[labels.indexOf(selected)];
 		if (!entry) return;
-		if (entry.status !== "Ready") { ctx.ui.notify(`Skipped: ${entry.status}${entry.reason ? ` — ${entry.reason}` : ""}`, "warning"); return; }
-		await deleteCleanupEntry(entry.launchId);
-		ctx.ui.notify(`Deleted BTW record: ${entry.launchId}`, "info");
+		const force = entry.status !== "Ready";
+		if (force && !await ctx.ui.confirm("Force delete BTW record?", `${entry.launchId}
+Status: ${entry.status}${entry.reason ? ` — ${entry.reason}` : ""}
+Permanently delete this transcript and its SoL-Pi objects? A running thread may fail or recreate files; pending merges may lose referenced data. This does not stop the thread or delete the parent data or temporary mailbox.`)) return;
+		await deleteCleanupEntry(entry.launchId, getAgentDir(), force);
+		ctx.ui.notify(`${force ? "Force-deleted" : "Deleted"} BTW record: ${entry.launchId}`, "info");
 	} catch (error) { ctx.ui.notify(`BTW cleanup failed: ${error instanceof Error ? error.message : String(error)}`, "error"); }
 }

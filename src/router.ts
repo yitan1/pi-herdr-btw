@@ -16,7 +16,7 @@ export const HELP_TEXT = `/btw usage:
 /btw config [...]           show or change defaults (persistent, auto-submit, share-key, share-header, model, thinking, tools, split, reset)
 /btw merge <prompt...>      fold this side thread into the parent and continue with the prompt
 /btw check                  show inheritance diagnostics without a model request
-/btw cleanup                delete one or all Ready records (no second confirmation)
+/btw cleanup                delete Ready records or force-delete other records from the same menu
 /btw help                   show this grammar`;
 
 /**
@@ -59,7 +59,7 @@ export function getBtwArgumentCompletions(prefix: string, child = false) {
 		? [
 			["merge", "Merge this side thread into the parent"],
 			["check", "Show inheritance diagnostics"],
-			["cleanup", "Review and delete closed persistent records"],
+			["cleanup", "Delete Ready records or force-delete other records"],
 			["help", "Show command help"],
 		]
 		: [
@@ -67,7 +67,7 @@ export function getBtwArgumentCompletions(prefix: string, child = false) {
 			["config", "Show or change defaults"],
 			["merge", "Check pending side-thread merges"],
 			["check", "Show request baseline status"],
-			["cleanup", "Review and delete closed persistent records"],
+			["cleanup", "Delete Ready records or force-delete other records"],
 			["help", "Show command help"],
 		];
 	const items = commands.filter(([value]) => value!.startsWith(argument))

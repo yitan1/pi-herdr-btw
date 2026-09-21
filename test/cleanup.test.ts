@@ -87,12 +87,14 @@ test("child closure never deletes data; pending merges require a matching ack", 
   assert.equal((await listCleanupEntries(agent))[0]?.status, "Pending merge");
   await store.writeMergeAck(mailbox, { protocolVersion: MERGE_PROTOCOL_VERSION, requestId: request.requestId, status: "accepted", processedAt: new Date().toISOString() });
   assert.equal((await listCleanupEntries(agent))[0]?.status, "Ready");
-  await deleteCleanupEntry("pending", agent);
+  await store.writeMergeRequest(mailbox, { ...request, requestId: "request-2" });
+  assert.equal((await listCleanupEntries(agent))[0]?.status, "Pending merge");
+  await deleteCleanupEntry("pending", agent, true);
   assert.ok(await store.read(mailbox)); // temporary mailbox not removed by manual cleanup
  } finally { if (mailbox) await store.remove(mailbox); await rm(agent, { recursive: true, force: true }); }
 });
 
-test("manual UI cancellation preserves records; Ready deletes immediately and unknown records are skipped", async () => {
+test("manual UI cancellation preserves records; Ready deletes immediately and force requires confirmation", async () => {
  const agent = await mkdtemp(join(tmpdir(), "btw-cleanup-ui-"));
  const previous = process.env.PI_CODING_AGENT_DIR;
  process.env.PI_CODING_AGENT_DIR = agent;
@@ -110,8 +112,10 @@ test("manual UI cancellation preserves records; Ready deletes immediately and un
   await showCleanup(ctx); await assert.rejects(lstat(root), { code: "ENOENT" });
   assert.match(notifications.at(-1)!, /Deleted BTW record/);
   const unknown = await record(agent, "unknown", { state: "running" });
+  let confirmations = 0;
+  ctx.ui.confirm = async () => { confirmations++; return false; };
   await showCleanup(ctx); assert.ok(await lstat(unknown));
-  assert.match(notifications.at(-1)!, /Skipped: Unknown/);
+  assert.equal(confirmations, 1);
  } finally {
   if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
   await rm(agent, { recursive: true, force: true });
@@ -156,7 +160,7 @@ test("one-click Delete all Ready rechecks each record and leaves other states un
   const notifications: string[] = [];
   const ctx = { hasUI: true, ui: {
    select: async (title: string, items: string[]) => {
-    assert.match(title, /delete immediately/);
+    assert.match(title, /Ready: immediate; Force: confirm/);
     assert.match(items[0]!, /^Delete all Ready \(3 records,/);
     await record(agent, "changed", { pid: process.pid, state: "running" });
     return items[0];
@@ -172,4 +176,55 @@ test("one-click Delete all Ready rechecks each record and leaves other states un
   if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
   await rm(agent, { recursive: true, force: true });
  }
+});
+
+test("force actions are in the same cleanup menu and require one risk confirmation", async () => {
+ const agent = await mkdtemp(join(tmpdir(), "btw-cleanup-force-ui-"));
+ const previous = process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR = agent;
+ try {
+  for (const [id, override] of [["running", { pid: process.pid }], ["unknown", { state: "running" }], ["pending", { merge: "pending" }]] as const) {
+   const root = await record(agent, id, override);
+   let confirmations = 0;
+   let selections = 0;
+   const ctx = { hasUI: true, ui: {
+    select: async (_title: string, items: string[]) => { selections++; return items.find((item) => item.startsWith("Force delete |") && item.endsWith(`| ${id}`)); },
+    confirm: async (title: string, message: string) => {
+     confirmations++;
+     assert.equal(title, "Force delete BTW record?");
+     assert.match(message, /running thread may fail/);
+     assert.match(message, /pending merges may lose referenced data/);
+     return true;
+    },
+    notify: () => undefined,
+   } } as unknown as ExtensionCommandContext;
+   await showCleanup(ctx);
+   assert.equal(selections, 1); assert.equal(confirmations, 1);
+   await assert.rejects(lstat(root), { code: "ENOENT" });
+  }
+ } finally {
+  if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
+  await rm(agent, { recursive: true, force: true });
+ }
+});
+
+test("force bypasses eligibility but never traversal, symlinks, or lifecycle locks", async () => {
+ const agent = await mkdtemp(join(tmpdir(), "btw-cleanup-force-"));
+ try {
+  const legacy = join(agent, "btw-sessions", "legacy");
+  await mkdir(legacy, { recursive: true, mode: 0o700 });
+  await writeFile(join(legacy, "old-data"), "legacy");
+  await deleteCleanupEntry("legacy", agent, true);
+  await assert.rejects(lstat(legacy), { code: "ENOENT" });
+  const root = await record(agent, "unsafe");
+  const external = join(agent, "outside"); await mkdir(external); await writeFile(join(external, "keep"), "keep");
+  await symlink(external, join(root, "link"));
+  await assert.rejects(deleteCleanupEntry("unsafe", agent, true), /Symlink/);
+  assert.equal(await readFile(join(external, "keep"), "utf8"), "keep");
+  await symlink(external, join(agent, "btw-sessions", "linked-root"));
+  await assert.rejects(deleteCleanupEntry("linked-root", agent, true), /Unsafe/);
+  await assert.rejects(deleteCleanupEntry("../outside", agent, true));
+  const locked = await record(agent, "locked"); await mkdir(join(locked, ".lifecycle-lock"));
+  await assert.rejects(deleteCleanupEntry("locked", agent, true), { code: "EEXIST" });
+ } finally { await rm(agent, { recursive: true, force: true }); }
 });
