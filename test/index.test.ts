@@ -24,6 +24,7 @@ import {
 import { fixturePayload } from "./fixtures.ts";
 
 type Command = {
+	getArgumentCompletions?: (prefix: string) => Array<{ value: string }> | null;
 	handler: (args: string, ctx: any) => Promise<void>;
 };
 
@@ -1303,4 +1304,19 @@ test("persistent session hooks record closure without deleting the durable trans
   if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
   await rm(agent, { recursive: true, force: true });
  }
+});
+
+
+test("cleanup completion is registered for all parent aliases and the child command", async () => {
+ await withParentEnvironment(async () => {
+  const harness = await createHarness(new FakeStore(), herdrExec());
+  try {
+   for (const name of ["btw", "btw1", "btw2"]) assert.deepEqual(harness.commands.get(name)?.getArgumentCompletions?.("cl")?.map((item) => item.value), ["cleanup"]);
+  } finally { harness.cleanup(); }
+ });
+ await withChildEnvironment("/tmp/pi-herdr-btw-test/launch-123/payload.json", async () => {
+  const harness = await createHarness(new FakeStore(), herdrExec());
+  try { assert.deepEqual(harness.commands.get("btw")?.getArgumentCompletions?.("cl")?.map((item) => item.value), ["cleanup"]); }
+  finally { harness.cleanup(); }
+ });
 });

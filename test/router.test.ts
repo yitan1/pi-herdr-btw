@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HELP_TEXT, parseBtwCommand } from "../src/router.ts";
+import { HELP_TEXT, parseBtwCommand, getBtwArgumentCompletions } from "../src/router.ts";
 
 test("bare /btw opens an empty side pane", () => {
 	assert.deepEqual(parseBtwCommand(""), { kind: "open" });
@@ -45,4 +45,17 @@ test("help text covers the full grammar", () => {
 	for (const token of ["ask", "config", "merge", "help", "check", "cleanup"]) {
 		assert.match(HELP_TEXT, new RegExp(`/btw ${token}`));
 	}
+});
+
+
+test("subcommand completion includes cleanup/check and leaves question text alone", () => {
+ assert.deepEqual(getBtwArgumentCompletions("cl")?.map((item) => item.value), ["cleanup"]);
+ assert.deepEqual(getBtwArgumentCompletions("ch")?.map((item) => item.value), ["check"]);
+ assert.ok(getBtwArgumentCompletions("")?.some((item) => item.value === "config"));
+ assert.equal(getBtwArgumentCompletions("check this code"), null);
+ assert.equal(getBtwArgumentCompletions("cleanup "), null);
+ assert.equal(getBtwArgumentCompletions("unknown"), null);
+ assert.deepEqual(getBtwArgumentCompletions("cl", true)?.map((item) => item.value), ["cleanup"]);
+ assert.equal(getBtwArgumentCompletions("config", true), null);
+ assert.ok(getBtwArgumentCompletions("", true)?.some((item) => item.value === "merge"));
 });

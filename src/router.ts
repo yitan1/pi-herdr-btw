@@ -50,3 +50,27 @@ export function parseBtwCommand(input: string): BtwRoute {
 			return { kind: "ask", question: trimmed };
 	}
 }
+
+/** Complete only the first argument; never reinterpret free-form question text. */
+export function getBtwArgumentCompletions(prefix: string, child = false) {
+	const argument = prefix.trimStart();
+	if (/\s/.test(argument)) return null;
+	const commands = child
+		? [
+			["merge", "Merge this side thread into the parent"],
+			["check", "Show inheritance diagnostics"],
+			["cleanup", "Review and delete closed persistent records"],
+			["help", "Show command help"],
+		]
+		: [
+			["ask", "Ask a question starting with a reserved word"],
+			["config", "Show or change defaults"],
+			["merge", "Check pending side-thread merges"],
+			["check", "Show request baseline status"],
+			["cleanup", "Review and delete closed persistent records"],
+			["help", "Show command help"],
+		];
+	const items = commands.filter(([value]) => value!.startsWith(argument))
+		.map(([value, description]) => ({ value: value!, label: value!, description }));
+	return items.length ? items : null;
+}

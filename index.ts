@@ -43,7 +43,7 @@ import {
 	MergeCoordinator,
 	type MergeRequest,
 } from "./src/merge.ts";
-import { HELP_TEXT, parseBtwCommand } from "./src/router.ts";
+import { HELP_TEXT, parseBtwCommand, getBtwArgumentCompletions } from "./src/router.ts";
 
 const CHILD_PAYLOAD_ENV = "PI_HERDR_BTW_PAYLOAD";
 const MERGE_POLL_INTERVAL_MS = 3_000;
@@ -278,6 +278,7 @@ async function configureChild(
 	// Child-side /btw: reviewed merge back to the parent, plus help.
 	let ackTimer: ReturnType<typeof setInterval> | undefined;
 	pi.registerCommand("btw", {
+		getArgumentCompletions: (prefix) => getBtwArgumentCompletions(prefix, true),
 		description:
 			"Side-thread /btw: fold this side thread into the parent and continue there (/btw merge <prompt...>)",
 		handler: async (args, ctx) => {
@@ -755,15 +756,18 @@ export async function registerBtwExtension(
 		// Pi has no argumentHint field for extension commands (only builtins and
 		// prompt templates); the TUI renders template hints as "hint — description",
 		// so we bake the same shape into the description.
-		description: "[question] — Open a Herdr side thread, or use ask, config, merge, help",
+		description: "[question] — Open a side thread; ask, config, merge, check, cleanup, help",
+		getArgumentCompletions: getBtwArgumentCompletions,
 		handler: (args, ctx) => handleBtw(args, ctx),
 	});
 	pi.registerCommand("btw1", {
 		description: "[question] — Open btw with shared cache key only",
+		getArgumentCompletions: getBtwArgumentCompletions,
 		handler: (args, ctx) => handleBtw(args, ctx, { shareKey: true, shareHeader: false }),
 	});
 	pi.registerCommand("btw2", {
 		description: "[question] — Open btw with shared cache key and header",
+		getArgumentCompletions: getBtwArgumentCompletions,
 		handler: (args, ctx) => handleBtw(args, ctx, { shareKey: true, shareHeader: true }),
 	});
 }
