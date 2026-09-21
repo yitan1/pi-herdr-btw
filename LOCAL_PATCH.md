@@ -121,7 +121,9 @@ See README limitations before interpreting a match as a cache-hit guarantee.
 
 ## Manual persistent-record cleanup
 
-`/btw cleanup` uses a select-and-confirm UI, with no model calls. New child sessions
+`/btw cleanup` uses one-click deletion for Ready records, with no model calls or
+second confirmation. The top action deletes all listed Ready records; each is
+rechecked under its lifecycle lock. New child sessions
 record running/closed lifecycle metadata; shutdown preserves durable files.
 Only confirmed closed records with a dead local PID and no pending merge are
 eligible. Legacy/uncertain records are skipped. A shared per-launch lock protects

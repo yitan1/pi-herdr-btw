@@ -164,13 +164,24 @@ export async function showCleanup(ctx: ExtensionCommandContext): Promise<void> {
 	try {
 		const entries = await listCleanupEntries();
 		if (!entries.length) { ctx.ui.notify("No persistent BTW records.", "info"); return; }
-		const labels = entries.map((entry) => `${entry.createdAt} | ${(entry.bytes / 1024 / 1024).toFixed(2)} MiB | ${entry.status} | ${entry.launchId}`);
-		const selected = await ctx.ui.select("BTW cleanup — select one record (Esc to cancel)", labels);
+		const ready = entries.filter((entry) => entry.status === "Ready");
+		const deleteAll = `Delete all Ready (${ready.length} records, ${(ready.reduce((sum, entry) => sum + entry.bytes, 0) / 1024 / 1024).toFixed(2)} MiB)`;
+		const labels = entries.map((entry) => `${entry.status === "Ready" ? "Delete" : "Keep"} | ${entry.createdAt} | ${(entry.bytes / 1024 / 1024).toFixed(2)} MiB | ${entry.status} | ${entry.launchId}`);
+		const selected = await ctx.ui.select("BTW cleanup — delete immediately (Esc to cancel)", ready.length ? [deleteAll, ...labels] : labels);
 		if (selected === undefined) return;
+		if (ready.length && selected === deleteAll) {
+			let deleted = 0;
+			const failures: string[] = [];
+			for (const entry of ready) {
+				try { await deleteCleanupEntry(entry.launchId); deleted++; }
+				catch (error) { failures.push(`${entry.launchId}: ${error instanceof Error ? error.message : String(error)}`); }
+			}
+			ctx.ui.notify(`Deleted ${deleted} BTW record(s).${failures.length ? ` Not completed: ${failures.length}.\n${failures.join("\n")}` : ""}`, failures.length ? "warning" : "info");
+			return;
+		}
 		const entry = entries[labels.indexOf(selected)];
 		if (!entry) return;
 		if (entry.status !== "Ready") { ctx.ui.notify(`Skipped: ${entry.status}${entry.reason ? ` — ${entry.reason}` : ""}`, "warning"); return; }
-		if (!await ctx.ui.confirm("Delete BTW record?", `${entry.launchId}\nThis permanently deletes its transcript and SoL-Pi objects, including data referenced by copied merge text. Parent data and temporary mailboxes are not touched.`)) return;
 		await deleteCleanupEntry(entry.launchId);
 		ctx.ui.notify(`Deleted BTW record: ${entry.launchId}`, "info");
 	} catch (error) { ctx.ui.notify(`BTW cleanup failed: ${error instanceof Error ? error.message : String(error)}`, "error"); }

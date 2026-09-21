@@ -198,8 +198,10 @@ the UI. Data-load and snapshot failures retain their explicit error messages.
 ### Manual cleanup
 
 Run `/btw cleanup` in an interactive Pi window. It lists persistent side-thread
-records by creation time, size, status, and launch ID. Select one record, then
-confirm permanent deletion. Escape/cancel never deletes anything. `cleanup` is
+records by creation time, size, status, and launch ID. Select **Delete all Ready**
+to remove all eligible records in one action, or select an individual **Delete**
+row. Deletion is immediate and permanent; there is no second confirmation.
+Escape/cancel never deletes anything. `cleanup` is
 now reserved; use `/btw ask cleanup ...` to ask a question with that first word.
 
 - **Ready**: a normal exit was recorded, the owning process is gone, and no merge
@@ -218,8 +220,8 @@ Deletion rechecks lifecycle and merge state while holding a lock shared with
 child startup. Only that launch's `btw-sessions/<launchId>/` directory is removed.
 Parent SoL-Pi data and temporary mailboxes are not touched. Existing automatic
 mailbox cleanup is unchanged. Copied merge text can still refer to child-only
-observation IDs; the confirmation warns that deleting the child record also
-removes those objects. Keep the record if you still need them.
+observation IDs; deleting the child record also removes those objects. Keep the record if you still need them.
 
-There is no scheduled cleanup, force-delete option, or delete-all action. Crashes
+There is no scheduled cleanup or force-delete option. Bulk deletion only considers
+records listed as Ready and rechecks each one before deleting. Crashes
 and uncertain state are deliberately retained rather than inferred safe from age.

@@ -92,21 +92,21 @@ test("child closure never deletes data; pending merges require a matching ack", 
  } finally { if (mailbox) await store.remove(mailbox); await rm(agent, { recursive: true, force: true }); }
 });
 
-test("manual UI cancellation preserves records; confirmation is required and unknown records are skipped", async () => {
+test("manual UI cancellation preserves records; Ready deletes immediately and unknown records are skipped", async () => {
  const agent = await mkdtemp(join(tmpdir(), "btw-cleanup-ui-"));
  const previous = process.env.PI_CODING_AGENT_DIR;
  process.env.PI_CODING_AGENT_DIR = agent;
  try {
   const root = await record(agent, "closed");
-  let confirmed = false;
+  let cancelled = true;
   const notifications: string[] = [];
   const ctx = { hasUI: true, ui: {
-   select: async (_title: string, items: string[]) => items[0],
-   confirm: async () => confirmed,
+   select: async (_title: string, items: string[]) => cancelled ? undefined : items.find((item) => !item.startsWith("Delete all Ready")),
+   confirm: async () => { throw new Error("No second confirmation expected"); },
    notify: (text: string) => notifications.push(text),
   } } as unknown as ExtensionCommandContext;
   await showCleanup(ctx); assert.ok(await lstat(root));
-  confirmed = true;
+  cancelled = false;
   await showCleanup(ctx); await assert.rejects(lstat(root), { code: "ENOENT" });
   assert.match(notifications.at(-1)!, /Deleted BTW record/);
   const unknown = await record(agent, "unknown", { state: "running" });
@@ -140,4 +140,36 @@ test("normal closure with no merge stays cleanable after mailbox cleanup; missin
   await writeFile(file, JSON.stringify({ ...unknown, pid: deadPid }));
   assert.equal((await listCleanupEntries(agent))[0]?.status, "Unknown");
  } finally { if (mailbox) await store.remove(mailbox); await rm(agent, { recursive: true, force: true }); }
+});
+
+
+test("one-click Delete all Ready rechecks each record and leaves other states untouched", async () => {
+ const agent = await mkdtemp(join(tmpdir(), "btw-cleanup-all-"));
+ const previous = process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR = agent;
+ try {
+  const first = await record(agent, "first");
+  const changed = await record(agent, "changed");
+  const last = await record(agent, "last");
+  const running = await record(agent, "running", { pid: process.pid });
+  const unknown = await record(agent, "unknown", { state: "running" });
+  const notifications: string[] = [];
+  const ctx = { hasUI: true, ui: {
+   select: async (title: string, items: string[]) => {
+    assert.match(title, /delete immediately/);
+    assert.match(items[0]!, /^Delete all Ready \(3 records,/);
+    await record(agent, "changed", { pid: process.pid, state: "running" });
+    return items[0];
+   },
+   confirm: async () => { throw new Error("No second confirmation expected"); },
+   notify: (text: string) => notifications.push(text),
+  } } as unknown as ExtensionCommandContext;
+  await showCleanup(ctx);
+  for (const path of [first, last]) await assert.rejects(lstat(path), { code: "ENOENT" });
+  for (const path of [changed, running, unknown]) assert.ok(await lstat(path));
+  assert.match(notifications.at(-1)!, /Deleted 2 BTW record\(s\)\. Not completed: 1/);
+ } finally {
+  if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
+  await rm(agent, { recursive: true, force: true });
+ }
 });

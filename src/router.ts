@@ -16,7 +16,7 @@ export const HELP_TEXT = `/btw usage:
 /btw config [...]           show or change defaults (persistent, auto-submit, share-key, share-header, model, thinking, tools, split, reset)
 /btw merge <prompt...>      fold this side thread into the parent and continue with the prompt
 /btw check                  show inheritance diagnostics without a model request
-/btw cleanup                select and confirm deletion of closed persistent records
+/btw cleanup                delete one or all Ready records (no second confirmation)
 /btw help                   show this grammar`;
 
 /**
