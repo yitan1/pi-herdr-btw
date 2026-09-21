@@ -79,12 +79,28 @@ export function compareRequests(parent: RequestFingerprint | undefined, child: R
 		status: system && tools && identity && matched === parent.inputHashes.length ? "match" : "different",
 		checkMs: child.captureMs + performance.now() - started };
 }
+export function formatInheritanceStatus(report: InheritanceReport | undefined): string {
+	if (!report) return "Check pending";
+	switch (report.status) {
+		case "match": return `Prefix matched ${report.matched}/${report.parentItems}`;
+		case "no-baseline": return "Unverified: no parent baseline";
+		case "unsupported": return "Unverified: unsupported request";
+		case "fallback": return "Reference context";
+		case "different": {
+			const differences = [!report.system && "system prompt", !report.tools && "tools", !report.identity && "model/API"].filter(Boolean);
+			if (differences.length) return `Mismatch: ${differences.join(", ")}`;
+			return `Prefix differs ${report.matched}/${report.parentItems}`;
+		}
+	}
+}
+
 export function formatInheritanceReport(report: InheritanceReport | undefined): string {
-	if (!report) return "首次请求继承检查：待首次请求（不会为检查额外调用模型）";
-	const labels = { match: "可观测前缀匹配", different: "不一致", "no-baseline": "无父请求基准，未验证", unsupported: "API 或请求格式不支持，未验证", fallback: "参考文档继承，不是原样请求前缀" };
-	const lines = [`首次请求继承检查：${labels[report.status]}`];
-	if (report.system !== undefined) lines.push(`系统提示词：${report.system ? "一致" : "不同"}；工具定义：${report.tools ? "一致" : "不同"}；模型/API：${report.identity ? "一致" : "不同"}`,
-		`父请求输入前缀：${report.matched}/${report.parentItems} 项匹配${report.matched < report.parentItems ? `（首个差异/缺失：第 ${report.matched + 1} 项）` : ""}`);
-	lines.push(`检查耗时：${report.checkMs.toFixed(2)} ms`, "范围：BTW 请求钩子处；后续扩展仍可能修改。缓存命中以 API usage 为准。");
+	const lines = [`First request: ${formatInheritanceStatus(report)}`];
+	if (report?.system !== undefined) {
+		if (report.system && report.tools && report.identity) lines.push("System / tools / model: match");
+		else lines.push(`System: ${report.system ? "match" : "different"}; tools: ${report.tools ? "match" : "different"}; model/API: ${report.identity ? "match" : "different"}`);
+		if (report.status === "different") lines.push(`Prefix: ${report.matched}/${report.parentItems}`);
+	}
+	if (report) lines.push(`Check time: ${report.checkMs.toFixed(2)} ms`);
 	return lines.join("\n");
 }

@@ -1153,7 +1153,7 @@ test("parent /btw check is local, aliases carry the current request baseline, ot
    const ctx = createCommandContext();
    Object.assign(ctx.model, { api: "openai-responses" });
    await harness.commands.get("btw")!.handler("check", ctx);
-   assert.match(ctx.notifications.at(-1)!.message, /无父请求基准/);
+   assert.match(ctx.notifications.at(-1)!.message, /No parent baseline/);
    assert.equal(harness.execCalls.length, 0);
    await harness.emit("before_provider_request", { payload: { model: "test-model", input: [{ role: "user", content: "parent question" }], tools: [] } }, ctx);
    for (const command of ["btw", "btw1", "btw2"]) {
@@ -1161,7 +1161,7 @@ test("parent /btw check is local, aliases carry the current request baseline, ot
     assert.equal(store.created.at(-1)!.parentRequestFingerprint?.inputHashes.length, 1);
    }
    await harness.commands.get("btw")!.handler("check", ctx);
-   assert.match(ctx.notifications.at(-1)!.message, /采集耗时/);
+   assert.match(ctx.notifications.at(-1)!.message, /items, .* ms/);
    Object.assign(ctx.sessionManager, { getSessionId: () => "another-session" });
    await harness.commands.get("btw")!.handler("question", ctx);
    assert.equal(store.created.at(-1)!.parentRequestFingerprint, undefined);
@@ -1181,14 +1181,14 @@ test("child checks its first request only, /btw check makes no request and chang
    Object.assign(ctx.model, { api: "openai-responses" });
    Object.assign(ctx.ui, { setWidget: () => undefined });
    await harness.commands.get("btw")!.handler("check", ctx);
-   assert.match(ctx.notifications.at(-1)!.message, /待首次请求/);
+   assert.match(ctx.notifications.at(-1)!.message, /Check pending/);
    await harness.emit("before_agent_start", { systemPrompt: "child system prompt" }, ctx);
    const before = JSON.stringify(body);
    await harness.emit("before_provider_request", { payload: body }, ctx);
    assert.equal(JSON.stringify(body), before);
    await harness.commands.get("btw")!.handler("check", ctx);
    const report = ctx.notifications.at(-1)!.message;
-   assert.match(report, /可观测前缀匹配/);
+   assert.match(report, /Prefix matched/);
    await harness.emit("before_provider_request", { payload: { ...body, instructions: "later changed" } }, ctx);
    await harness.commands.get("btw")!.handler("check", ctx);
    assert.equal(ctx.notifications.at(-1)!.message, report);
@@ -1209,6 +1209,37 @@ test("tampered parent context is blocked before submission", async () => {
    const result = await harness.emit("input", { text: "hello" }, ctx);
    assert.ok(result.some((r: any) => r?.action === "handled"));
    assert.match(ctx.notifications.at(-1)!.message, /integrity check failed/);
+  } finally { harness.cleanup(); }
+ });
+});
+
+test("child uses one English status line and reports actual sharing and header conflicts", async () => {
+ await withChildEnvironment("/tmp/pi-herdr-btw-test/launch-123/payload.json", async () => {
+  const store = new FakeStore();
+  const body = { model: "test-model", input: [{ role: "user", content: "question" }], prompt_cache_key: "child-key" };
+  store.readValue = fixturePayload({ config: { ...DEFAULT_CONFIG, shareKey: true, shareHeader: true }, parentRequestFingerprint: captureRequest(body, { sessionId: "12345678-1234-1234-1234-123456789abc", provider: "test-provider", model: "test-model", api: "openai-responses" }) });
+  const harness = await createHarness(store, herdrExec());
+  try {
+   const ctx = createCommandContext();
+   const widgets = new Map<string, string[] | undefined>();
+   Object.assign(ctx.model, { api: "openai-responses" });
+   Object.assign(ctx.ui, { setWidget: (name: string, lines: string[] | undefined) => widgets.set(name, lines), setTitle: () => undefined, setEditorText: () => undefined });
+   await harness.emit("session_start", { reason: "startup" }, ctx);
+   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Check pending"]);
+   for (const old of ["herdr-btw-inheritance", "herdr-btw-cache-key", "herdr-btw-session-header"]) assert.equal(widgets.get(old), undefined);
+   await harness.emit("before_agent_start", { systemPrompt: "child" }, ctx);
+   await harness.emit("before_provider_request", { payload: body }, ctx);
+   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Prefix matched 1/1 · Shared: key"]);
+   await harness.emit("before_provider_headers", { headers: {} }, ctx);
+   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Prefix matched 1/1 · Shared: key+header"]);
+   await harness.emit("before_provider_headers", { headers: { "session-id": "conflicting" } }, ctx);
+   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Prefix matched 1/1 · Shared: key · Warning: header conflict"]);
+   await harness.commands.get("btw")!.handler("check", ctx);
+   const detail = ctx.notifications.at(-1)!.message;
+   assert.match(detail, /Parent context: 1 messages, integrity OK/);
+   assert.match(detail, /Warning: session-id header conflict/);
+   assert.doesNotMatch(detail, /Scope:|Cache hits|[\u4e00-\u9fff]/);
+   assert.equal([...widgets.values()].filter((lines) => lines !== undefined).length, 1);
   } finally { harness.cleanup(); }
  });
 });

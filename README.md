@@ -180,3 +180,17 @@ Actual cache hits must be confirmed from provider usage.
 The display reports fingerprint/comparison time, excluding snapshot disk copying,
 payload integrity verification, and network latency. Diagnostics themselves do
 not send additional API requests.
+
+The persistent status widget is a single English line, for example:
+
+```text
+BTW · Check pending
+BTW · Prefix matched 38/38 · Shared: key+header
+BTW · Mismatch: tools
+BTW · Unverified: no parent baseline
+```
+
+Sharing markers reflect applied request hints, not merely saved preferences.
+Header conflicts remain visible. `/btw check` shows concise English details;
+request-scope and cache-hit caveats are documented here rather than repeated in
+the UI. Data-load and snapshot failures retain their explicit error messages.

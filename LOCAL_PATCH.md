@@ -115,6 +115,6 @@ Parent request fingerprints are memory-only and session-bound. The optional
 payload fields `parentRequestFingerprint` and `parentContextHash` are compatible
 with existing version-4 payloads. Children check data integrity at load and compare
 the first supported request against the parent baseline. `/btw check` is local.
-No final-hook ordering guarantee is assumed: reports explicitly describe BTW's
+No final-hook ordering guarantee is assumed; the README documents BTW's
 observation point. The diagnostic does not mutate provider bodies or cache policy.
 See README limitations before interpreting a match as a cache-hit guarantee.

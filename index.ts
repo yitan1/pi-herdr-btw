@@ -1,4 +1,4 @@
-import { captureRequest, compareRequests, fingerprint, formatInheritanceReport, type RequestFingerprint, type InheritanceReport } from "./src/inheritance-check.ts";
+import { captureRequest, compareRequests, fingerprint, formatInheritanceReport, formatInheritanceStatus, type RequestFingerprint, type InheritanceReport } from "./src/inheritance-check.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -130,31 +130,38 @@ async function configureChild(
 	const cache: CacheMode = { mode: "fallback", reason: "not yet negotiated" };
 	let inheritanceReport: InheritanceReport | undefined;
 	let inheritanceChecked = false;
-	let observationStatus = payload?.config.persistent ? "快照对象：等待初始化" : "快照对象：未启用持久化";
-	function inheritanceSummary(): string {
-		const loaded = payload ? `父数据：已加载 ${payload.messages.length} 条消息（${payload.parentContextHash ? "完整性校验通过" : "旧 payload，无完整性指纹"}）` : "父数据：加载失败";
-		const baseline = payload?.parentRequestFingerprint;
-		return `${loaded}\n${observationStatus}${baseline ? `\n父请求基准：${baseline.capturedAt}（不覆盖其后新增内容）` : ""}\n${formatInheritanceReport(inheritanceReport)}`;
+	let observationStatus = payload?.config.persistent ? "Observations: pending" : "Observations: not enabled";
+	let sharedKey = false;
+	let sharedHeader = false;
+	let headerConflict = false;
+	function sharingLabel(): string {
+		return sharedKey && sharedHeader ? "key+header" : sharedKey ? "key" : sharedHeader ? "header" : "none";
 	}
-	let widgetUi:
-		| { setWidget(name: string, lines: string[]): void; theme: { fg(color: string, text: string): string } }
-		| undefined;
-
-	function renderWidget(): void {
-		if (!widgetUi || !payload) return;
-		const capability =
-			payload.config.tools === "none"
-				? "tool-free"
-				: payload.config.tools === "read-only"
-					? "read-only"
-					: "tool-enabled";
-		widgetUi.setWidget("herdr-btw-context", [
-			widgetUi.theme.fg("accent", `BTW — ${capability} pane`),
-		]);
+	function inheritanceSummary(): string {
+		const loaded = payload ? `Parent context: ${payload.messages.length} messages, ${payload.parentContextHash ? "integrity OK" : "integrity unchecked (legacy)"}` : "Parent context: load failed";
+		return `${loaded}\n${observationStatus}\n${formatInheritanceReport(inheritanceReport)}\nShared: ${sharingLabel()}${headerConflict ? "\nWarning: session-id header conflict" : ""}`;
+	}
+	type StatusUI = { setWidget(name: string, lines: string[] | undefined): void };
+	let widgetUi: StatusUI | undefined;
+	function renderWidget(ui = widgetUi): void {
+		if (!ui || !payload) return;
+		const parts = ["BTW", formatInheritanceStatus(inheritanceReport)];
+		if (sharedKey || sharedHeader) parts.push(`Shared: ${sharingLabel()}`);
+		if (headerConflict) parts.push("Warning: header conflict");
+		if (payload.config.tools === "none") parts.push("tool-free");
+		else if (payload.config.tools === "read-only") parts.push("read-only");
+		ui.setWidget("herdr-btw-context", [parts.join(" · ")]);
+	}
+	function clearLegacyWidgets(ui: StatusUI): void {
+		for (const name of ["herdr-btw-inheritance", "herdr-btw-cache-key", "herdr-btw-session-header"]) ui.setWidget(name, undefined);
 	}
 
 	pi.on("before_agent_start", (event, ctx) => {
 		if (!payload) return;
+		sharedKey = false;
+		sharedHeader = false;
+		headerConflict = false;
+		renderWidget(ctx.ui);
 		const decision = decideCacheMode(payload, {
 			model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
 			activeTools: pi.getActiveTools(),
@@ -179,8 +186,10 @@ async function configureChild(
 			&& process.env.PI_HERDR_BTW_SHARE_CACHE_KEY !== "0"
 			&& cache.mode === "native"
 			&& ctx.model?.api === "openai-responses";
+		sharedHeader = false;
+		headerConflict = false;
 		if (!enabled) {
-			ctx.ui.setWidget("herdr-btw-session-header", ["Session header: unchanged"]);
+			renderWidget(ctx.ui);
 			return;
 		}
 		// Sub2API gives session-id precedence over session_id. Do not silently
@@ -190,14 +199,16 @@ async function configureChild(
 			name.toLowerCase() === "session-id" && typeof value === "string"
 			&& value.trim() !== "" && value.trim() !== parentSessionId);
 		if (conflict) {
-			ctx.ui.setWidget("herdr-btw-session-header", ["Session header: unchanged (conflicting session-id header)"]);
+			headerConflict = true;
+			renderWidget(ctx.ui);
 			return;
 		}
 		for (const name of Object.keys(event.headers)) {
 			if (name.toLowerCase() === "session_id") event.headers[name] = null;
 		}
 		event.headers["session_id"] = payload.parentSessionId;
-		ctx.ui.setWidget("herdr-btw-session-header", ["Session header: parent (experimental)"]);
+		sharedHeader = true;
+		renderWidget(ctx.ui);
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {
@@ -211,7 +222,6 @@ async function configureChild(
 			} catch {
 				inheritanceReport = { status: "unsupported", matched: 0, parentItems: 0, checkMs: 0 };
 			}
-			ctx.ui.setWidget("herdr-btw-inheritance", inheritanceSummary().split("\n"));
 		}
 		const supportedApi = ctx.model?.api === "openai-responses" || ctx.model?.api === "openai-codex-responses";
 		const share = payload.config.shareKey === true
@@ -222,10 +232,8 @@ async function configureChild(
 			&& "prompt_cache_key" in body
 			&& typeof body.prompt_cache_key === "string"
 			&& body.prompt_cache_key.length > 0;
-		ctx.ui.setWidget("herdr-btw-cache-key", [
-			`Cache path: ${cache.mode}${cache.reason ? ` — ${cache.reason}` : ""}`,
-			`Cache key: ${share ? "parent (experimental)" : "unchanged"}; actual hits: see cache usage`,
-		]);
+		sharedKey = share;
+		renderWidget(ctx.ui);
 		if (!share) return;
 		const patchedBody = {
 			...body,
@@ -398,7 +406,7 @@ async function configureChild(
 		if (payload?.config.persistent) {
 			try {
 				const count = await installParentObservations(payload.launchId, ctx.sessionManager.getSessionDir(), ctx.sessionManager.getSessionId());
-				observationStatus = `快照对象：${count} 个已就绪`;
+				observationStatus = `Observations: ${count} ready`;
 			} catch (error) {
 				payloadError = `Observation snapshot initialization failed: ${error instanceof Error ? error.message : String(error)}`;
 				payload = undefined;
@@ -415,12 +423,13 @@ async function configureChild(
 				ctx.ui.theme.fg("dim", payloadError),
 				ctx.ui.theme.fg("dim", "Prompts are blocked. Quit this pane and retry /btw from the parent."),
 			]);
+			clearLegacyWidgets(ctx.ui);
 			return;
 		}
 
 		widgetUi = ctx.ui;
 		renderWidget();
-		ctx.ui.setWidget("herdr-btw-inheritance", inheritanceSummary().split("\n"));
+		clearLegacyWidgets(ctx.ui);
 
 		// Auto-submit drafts are sent via the launch-draft sentinel instead of
 		// here: session_start fires before pi's initial render, and a message
@@ -524,7 +533,7 @@ export async function registerBtwExtension(
 			const route = parseBtwCommand(args);
 			if (route.kind === "check") {
 				const baseline = parentRequestFingerprint?.sessionId === ctx.sessionManager.getSessionId() ? parentRequestFingerprint : undefined;
-				ctx.ui.notify(baseline ? `父请求基准：${baseline.inputHashes.length} 项；采集耗时 ${baseline.captureMs.toFixed(2)} ms；时间 ${baseline.capturedAt}。在侧线程运行 /btw check 查看比较结果。` : "无父请求基准；需要父线程先发出一次受支持的请求。此命令不会调用模型。", "info");
+				ctx.ui.notify(baseline ? `Parent baseline: ${baseline.inputHashes.length} items, ${baseline.captureMs.toFixed(2)} ms\nCaptured: ${baseline.capturedAt}\nRun /btw check in the side thread to compare.` : "No parent baseline. Send a parent message first.", "info");
 				return;
 			}
 

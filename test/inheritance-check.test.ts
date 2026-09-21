@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captureRequest, compareRequests, fingerprint, formatInheritanceReport, isRequestFingerprint } from "../src/inheritance-check.ts";
+import { captureRequest, compareRequests, fingerprint, formatInheritanceReport, formatInheritanceStatus, isRequestFingerprint } from "../src/inheritance-check.ts";
 import { createPayload, isBtwPayload } from "../src/core.ts";
 import { fixturePayloadOptions } from "./fixtures.ts";
 
@@ -25,7 +25,7 @@ test("child suffixes retain the prefix; cache hints do not affect prompt fingerp
 	assert.equal(report.status, "match");
 	assert.equal(report.matched, 2);
 	assert.ok(report.checkMs >= 0);
-	assert.match(formatInheritanceReport(report), /后续扩展仍可能修改/);
+	assert.doesNotMatch(formatInheritanceReport(report), /Scope:|Cache hits|later extensions/);
 });
 
 test("system, same-name tool schema, tool order, context projection and model changes are detected", () => {
@@ -50,7 +50,7 @@ test("missing baselines, fallback and unsupported request formats never report a
 	assert.equal(compareRequests(parent, parent, false).status, "fallback");
 	for (const body of [null, {}, { ...request(), input: "string input" }, { ...request(), input: [] }, { ...request(), previous_response_id: "server-side-history" }]) assert.equal(captureRequest(body, identity), undefined);
 	assert.equal(captureRequest(request(), { ...identity, api: "anthropic-messages" }), undefined);
-	assert.match(formatInheritanceReport(undefined), /待首次请求/);
+	assert.match(formatInheritanceReport(undefined), /Check pending/);
 });
 
 test("new payloads hash parent context; old payloads and optional request baselines remain compatible", () => {
@@ -62,4 +62,20 @@ test("new payloads hash parent context; old payloads and optional request baseli
 	const baseline = captureRequest(request(), { ...identity, sessionId: payload.parentSessionId })!;
 	assert.ok(isBtwPayload({ ...payload, parentRequestFingerprint: baseline }));
 	assert.equal(isBtwPayload({ ...payload, parentRequestFingerprint: { ...baseline, sessionId: "wrong-session" } }), false);
+});
+
+
+test("compact English status covers pending, unverifiable and mismatch cases", () => {
+ const base = { matched: 12, parentItems: 38, checkMs: 1.25 };
+ assert.equal(formatInheritanceStatus(undefined), "Check pending");
+ assert.equal(formatInheritanceStatus({ ...base, status: "match", matched: 38 }), "Prefix matched 38/38");
+ assert.equal(formatInheritanceStatus({ ...base, status: "no-baseline" }), "Unverified: no parent baseline");
+ assert.equal(formatInheritanceStatus({ ...base, status: "unsupported" }), "Unverified: unsupported request");
+ assert.equal(formatInheritanceStatus({ ...base, status: "fallback" }), "Reference context");
+ assert.equal(formatInheritanceStatus({ ...base, status: "different", system: true, tools: true, identity: true }), "Prefix differs 12/38");
+ assert.equal(formatInheritanceStatus({ ...base, status: "different", system: true, tools: false, identity: true }), "Mismatch: tools");
+ assert.equal(formatInheritanceStatus({ ...base, status: "different", system: false, tools: true, identity: true }), "Mismatch: system prompt");
+ assert.equal(formatInheritanceStatus({ ...base, status: "different", system: true, tools: true, identity: false }), "Mismatch: model/API");
+ const report = formatInheritanceReport({ ...base, status: "match", matched: 38, system: true, tools: true, identity: true });
+ assert.equal(report, "First request: Prefix matched 38/38\nSystem / tools / model: match\nCheck time: 1.25 ms");
 });
