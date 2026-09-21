@@ -1,4 +1,5 @@
 import { captureRequest, compareRequests, fingerprint, formatInheritanceReport, formatInheritanceStatus, type RequestFingerprint, type InheritanceReport } from "./src/inheritance-check.ts";
+import { markPersistentRunning, markPersistentClosed, showCleanup } from "./src/cleanup.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -120,6 +121,7 @@ async function configureChild(
 		payloadError = error instanceof Error ? error.message : String(error);
 	}
 
+	const persistentLaunchId = payload?.config.persistent ? payload.launchId : undefined;
 	const contextDocument = payload
 		? buildContextDocument(
 				payload.metadata,
@@ -287,6 +289,10 @@ async function configureChild(
 				return;
 			}
 			const route = parseBtwCommand(args);
+			if (route.kind === "cleanup") {
+				await showCleanup(ctx);
+				return;
+			}
 			if (route.kind === "check") {
 				ctx.ui.notify(inheritanceSummary(), "info");
 				return;
@@ -405,6 +411,7 @@ async function configureChild(
 	pi.on("session_start", async (event, ctx) => {
 		if (payload?.config.persistent) {
 			try {
+				await markPersistentRunning(payload.launchId, payloadPath);
 				const count = await installParentObservations(payload.launchId, ctx.sessionManager.getSessionDir(), ctx.sessionManager.getSessionId());
 				observationStatus = `Observations: ${count} ready`;
 			} catch (error) {
@@ -445,6 +452,8 @@ async function configureChild(
 			ackTimer = undefined;
 		}
 		if (event.reason === "quit") {
+			// Record closure before the existing mailbox cleanup. Never delete durable data here.
+			if (persistentLaunchId) await markPersistentClosed(persistentLaunchId).catch(() => undefined);
 			// Acknowledgement-aware cleanup: an unacknowledged merge outlives the
 			// child (until ack or the stale TTL), so the parent can still import it.
 			await store.removeIfNoPendingMerge(payloadPath).catch(() => undefined);
@@ -531,6 +540,10 @@ export async function registerBtwExtension(
 			sessionCtx = ctx;
 			notifyFn = (message, type) => ctx.ui.notify(message, type);
 			const route = parseBtwCommand(args);
+			if (route.kind === "cleanup") {
+				await showCleanup(ctx);
+				return;
+			}
 			if (route.kind === "check") {
 				const baseline = parentRequestFingerprint?.sessionId === ctx.sessionManager.getSessionId() ? parentRequestFingerprint : undefined;
 				ctx.ui.notify(baseline ? `Parent baseline: ${baseline.inputHashes.length} items, ${baseline.captureMs.toFixed(2)} ms\nCaptured: ${baseline.capturedAt}\nRun /btw check in the side thread to compare.` : "No parent baseline. Send a parent message first.", "info");

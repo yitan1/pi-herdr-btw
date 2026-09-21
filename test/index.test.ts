@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG, type BtwConfig } from "../src/config.ts";
+import { ContextStore } from "../src/context-store.ts";
+import { preparePersistentSession } from "../src/persistent-session.ts";
 import { captureRequest } from "../src/inheritance-check.ts";
 import type { BtwPayload } from "../src/core.ts";
 import {
@@ -1242,4 +1244,63 @@ test("child uses one English status line and reports actual sharing and header c
    assert.equal([...widgets.values()].filter((lines) => lines !== undefined).length, 1);
   } finally { harness.cleanup(); }
  });
+});
+
+test("cleanup routes locally for all parent aliases before any model or Herdr launch checks", async () => {
+ const agent = await mkdtemp(join(tmpdir(), "btw-cleanup-command-"));
+ const previous = process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR = agent;
+ try {
+  await withParentEnvironment(async () => {
+   const harness = await createHarness(new FakeStore(), herdrExec());
+   try {
+    const ctx = createCommandContext();
+    ctx.model = undefined;
+    for (const command of ["btw", "btw1", "btw2"]) {
+     await harness.commands.get(command)!.handler("cleanup", ctx);
+     assert.equal(ctx.notifications.at(-1)?.message, "No persistent BTW records.");
+    }
+    assert.deepEqual(harness.execCalls, []);
+    assert.deepEqual(harness.sentUserMessages, []);
+   } finally { harness.cleanup(); }
+  });
+ } finally {
+  if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
+  await rm(agent, { recursive: true, force: true });
+ }
+});
+
+
+test("persistent session hooks record closure without deleting the durable transcript or snapshot", async () => {
+ const agent = await mkdtemp(join(tmpdir(), "btw-cleanup-hooks-"));
+ const previous = process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR = agent;
+ const realStore = new ContextStore();
+ let mailbox: string | undefined;
+ try {
+  const payload = fixturePayload({ launchId: "hook-test", config: { ...DEFAULT_CONFIG, persistent: true } });
+  const sessionDir = await preparePersistentSession(payload.launchId, undefined, payload.parentSessionId, agent);
+  mailbox = await realStore.create(payload);
+  await withChildEnvironment(mailbox, async () => {
+   const fakeStore = new FakeStore(); fakeStore.readValue = payload;
+   const harness = await createHarness(fakeStore, herdrExec());
+   try {
+    const ctx = createCommandContext();
+    ctx.mode = "rpc";
+    Object.assign(ctx.sessionManager, { getSessionDir: () => sessionDir, getSessionId: () => "child-id" });
+    await harness.emit("session_start", { reason: "startup" }, ctx);
+    const stateFile = join(agent, "btw-sessions", payload.launchId, "lifecycle.json");
+    assert.equal(JSON.parse(await readFile(stateFile, "utf8")).state, "running");
+    await harness.emit("session_shutdown", { reason: "quit" }, ctx);
+    const state = JSON.parse(await readFile(stateFile, "utf8"));
+    assert.equal(state.state, "closed"); assert.equal(state.merge, "none");
+    assert.equal(await readFile(join(agent, "btw-sessions", payload.launchId, "observations.json"), "utf8"), "[]");
+    assert.deepEqual(fakeStore.removed, [mailbox]);
+   } finally { harness.cleanup(); }
+  });
+ } finally {
+  if (mailbox) await realStore.remove(mailbox);
+  if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
+  await rm(agent, { recursive: true, force: true });
+ }
 });

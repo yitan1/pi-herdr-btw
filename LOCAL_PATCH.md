@@ -118,3 +118,12 @@ the first supported request against the parent baseline. `/btw check` is local.
 No final-hook ordering guarantee is assumed; the README documents BTW's
 observation point. The diagnostic does not mutate provider bodies or cache policy.
 See README limitations before interpreting a match as a cache-hit guarantee.
+
+## Manual persistent-record cleanup
+
+`/btw cleanup` uses a select-and-confirm UI, with no model calls. New child sessions
+record running/closed lifecycle metadata; shutdown preserves durable files.
+Only confirmed closed records with a dead local PID and no pending merge are
+eligible. Legacy/uncertain records are skipped. A shared per-launch lock protects
+startup and final deletion checks. Manual deletion removes only the persistent
+launch directory; mailbox TTL cleanup and parent runtime data are unchanged.

@@ -194,3 +194,32 @@ Sharing markers reflect applied request hints, not merely saved preferences.
 Header conflicts remain visible. `/btw check` shows concise English details;
 request-scope and cache-hit caveats are documented here rather than repeated in
 the UI. Data-load and snapshot failures retain their explicit error messages.
+
+### Manual cleanup
+
+Run `/btw cleanup` in an interactive Pi window. It lists persistent side-thread
+records by creation time, size, status, and launch ID. Select one record, then
+confirm permanent deletion. Escape/cancel never deletes anything. `cleanup` is
+now reserved; use `/btw ask cleanup ...` to ask a question with that first word.
+
+- **Ready**: a normal exit was recorded, the owning process is gone, and no merge
+  remains unacknowledged. These records can be selected for deletion.
+- **Running**: the recorded process still exists (including conservative PID reuse).
+- **Pending merge**: the closed thread still has an unacknowledged merge request.
+- **Unknown**: legacy/missing metadata, abnormal exit, missing merge evidence,
+  another host, unsafe files, or an in-progress/stale lifecycle lock. Skipped.
+
+New persistent children write a private `lifecycle.json` at startup and normal
+quit. Closing a thread does NOT delete its persistent data. Old records have no
+reliable lifecycle evidence and are intentionally not automatically classified
+as safe; they remain available for carefully reviewed filesystem cleanup.
+
+Deletion rechecks lifecycle and merge state while holding a lock shared with
+child startup. Only that launch's `btw-sessions/<launchId>/` directory is removed.
+Parent SoL-Pi data and temporary mailboxes are not touched. Existing automatic
+mailbox cleanup is unchanged. Copied merge text can still refer to child-only
+observation IDs; the confirmation warns that deleting the child record also
+removes those objects. Keep the record if you still need them.
+
+There is no scheduled cleanup, force-delete option, or delete-all action. Crashes
+and uncertain state are deliberately retained rather than inferred safe from age.
