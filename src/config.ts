@@ -10,6 +10,8 @@ export type BtwSplit = "right" | "down";
 
 export type BtwConfig = {
 	autoSubmit: boolean;
+	/** Persist side sessions and snapshot parent Observation Pack objects. */
+	persistent: boolean;
 	/** Share the parent session id as the outbound prompt_cache_key. */
 	shareKey: boolean;
 	/** Share the parent session id as the outbound session_id header. */
@@ -22,6 +24,7 @@ export type BtwConfig = {
 
 export const DEFAULT_CONFIG: Readonly<BtwConfig> = Object.freeze({
 	autoSubmit: false,
+	persistent: false,
 	shareKey: false,
 	shareHeader: false,
 	model: null,
@@ -42,6 +45,10 @@ export function parseConfig(value: unknown): BtwConfig {
 	if (!isRecord(value)) throw new Error("/btw config must be a JSON object");
 
 	const config = { ...DEFAULT_CONFIG };
+	if ("persistent" in value) {
+		if (typeof value.persistent !== "boolean") throw new Error("persistent must be true or false");
+		config.persistent = value.persistent;
+	}
 	if ("autoSubmit" in value) {
 		if (typeof value.autoSubmit !== "boolean") throw new Error("autoSubmit must be true or false");
 		config.autoSubmit = value.autoSubmit;
@@ -86,6 +93,7 @@ export function parseConfig(value: unknown): BtwConfig {
 export function formatConfig(config: BtwConfig): string {
 	return [
 		`auto-submit: ${config.autoSubmit ? "on" : "off"}`,
+		`persistent: ${config.persistent ? "on" : "off"}`,
 		`share-key: ${config.shareKey ? "on" : "off"}`,
 		`share-header: ${config.shareHeader ? "on" : "off"}`,
 		`model: ${config.model ?? "inherit"}`,
@@ -96,7 +104,7 @@ export function formatConfig(config: BtwConfig): string {
 }
 
 export const CONFIG_COMMAND_USAGE =
-	"/btw config [auto-submit on|off | share-key on|off | share-header on|off | model inherit|provider/model | thinking inherit|off|minimal|low|medium|high|xhigh|max | tools inherit|all|read-only|none | split right|down | reset]";
+	"/btw config [persistent on|off | auto-submit on|off | share-key on|off | share-header on|off | model inherit|provider/model | thinking inherit|off|minimal|low|medium|high|xhigh|max | tools inherit|all|read-only|none | split right|down | reset]";
 
 export type ConfigCommandResult = {
 	action: "show" | "save" | "reset";
@@ -113,6 +121,10 @@ export function applyConfigCommand(current: BtwConfig, input: string): ConfigCom
 	const config = { ...current };
 
 	switch (key) {
+		case "persistent":
+			if (value !== "on" && value !== "off") throw new Error(CONFIG_COMMAND_USAGE);
+			config.persistent = value === "on";
+			break;
 		case "auto-submit":
 			if (value !== "on" && value !== "off") throw new Error(CONFIG_COMMAND_USAGE);
 			config.autoSubmit = value === "on";

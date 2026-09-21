@@ -86,6 +86,8 @@ export type HerdrLaunchOptions = {
 	initialMessage?: string;
 	/** Explicit child extension allowlist. Undefined preserves automatic discovery. */
 	childExtensions?: string[];
+	/** Omit for the original ephemeral mode. */
+	sessionDir?: string;
 };
 
 export type LaunchResult = {
@@ -145,6 +147,7 @@ export function isBtwPayload(value: unknown): value is BtwPayload {
 		!!payload.config &&
 		typeof payload.config === "object" &&
 		typeof payload.config.autoSubmit === "boolean" &&
+		(payload.config.persistent === undefined || typeof payload.config.persistent === "boolean") &&
 		(payload.config.shareKey === undefined || typeof payload.config.shareKey === "boolean") &&
 		(payload.config.shareHeader === undefined || typeof payload.config.shareHeader === "boolean") &&
 		(payload.config.model === null ||
@@ -257,7 +260,7 @@ export function buildAgentStartArgs(options: HerdrLaunchOptions, paneId: string)
 		"--pane",
 		paneId,
 		"--",
-		"--no-session",
+		...(options.sessionDir ? ["--session-dir", options.sessionDir] : ["--no-session"]),
 		...(options.childExtensions === undefined
 			? []
 			: ["--no-extensions", ...options.childExtensions.flatMap((path) => ["-e", path])]),

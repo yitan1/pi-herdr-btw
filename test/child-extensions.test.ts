@@ -65,6 +65,8 @@ test("named allow/deny policies, defaults and missing optional extensions", asyn
 		};
 		const own = await realpath(self);
 		assert.equal(await load({}), undefined);
+		await writeFile(config, JSON.stringify({ mode: "inherit", denylist: ["sol-pi"] }));
+		assert.deepEqual(await loadChildExtensions(config, self, { ...options, forceExplicit: true }), [own, "/enabled/web.ts", "/enabled/sol.ts"]);
 		assert.equal(await load({ mode: "inherit", allowlist: [], denylist: [] }), undefined);
 		assert.deepEqual(await load({ mode: "allowlist", allowlist: [] }), [own]);
 		assert.deepEqual(await load({ mode: "allowlist", allowlist: ["pi-web-access", "absent"] }), [own, "/enabled/web.ts"]);

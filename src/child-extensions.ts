@@ -6,6 +6,8 @@ import { DefaultPackageManager, getAgentDir, SettingsManager } from "@earendil-w
 export type ExtensionCandidate = { path: string; names: string[] };
 export type ChildExtensionOptions = {
 	cwd?: string;
+	/** Resolve inherited policy explicitly so BTW can inject context before other extensions. */
+	forceExplicit?: boolean;
 	projectTrusted?: boolean;
 	warn?: (message: string) => void;
 	resolve?: () => Promise<ExtensionCandidate[]>;
@@ -44,8 +46,10 @@ export async function loadChildExtensions(
 	let text: string;
 	try { text = await readFile(path, "utf8"); }
 	catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-		throw error;
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			if (!options.forceExplicit) return undefined;
+			text = "{}";
+		} else throw error;
 	}
 	const config: unknown = JSON.parse(text);
 	if (Array.isArray(config)) {
@@ -67,10 +71,10 @@ export async function loadChildExtensions(
 		|| ![allowlist, denylist].every((list) => Array.isArray(list) && list.every((s) => typeof s === "string" && s.trim().length > 0))) {
 		throw new Error("/btw invalid extension policy: expected mode, allowlist, denylist and onMissing");
 	}
-	if (mode === "inherit") return undefined;
+	if (mode === "inherit" && !options.forceExplicit) return undefined;
 	const candidates = await (options.resolve ?? (() => discover(options)))();
 	const self = await realpath(selfPath);
-	const selectors = (mode === "allowlist" ? allowlist : denylist) as string[];
+	const selectors = (mode === "inherit" ? [] : mode === "allowlist" ? allowlist : denylist) as string[];
 	const matched = new Set<string>();
 	for (const selector of selectors) {
 		let normalized = selector;

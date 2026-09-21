@@ -1084,3 +1084,61 @@ for (const mode of ["allowlist", "denylist"] as const) {
   }
  });
 }
+
+test("persistent aliases use separate durable directories and retain sharing overrides", async () => {
+ const dir = await mkdtemp(join(tmpdir(), "btw-persistent-alias-"));
+ const previous = process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR = dir;
+ try {
+  await withParentEnvironment(async () => {
+   const store = new FakeStore();
+   const config = new FakeConfigStore();
+   config.config.persistent = true;
+   const harness = await createHarness(store, herdrExec(), config);
+   try {
+    const dirs = new Set<string>();
+    for (const [command, key, header] of [["btw", false, false], ["btw1", true, false], ["btw2", true, true]] as const) {
+     const ctx = createCommandContext();
+     Object.assign(ctx.sessionManager, { getSessionDir: () => undefined });
+     await harness.commands.get(command)!.handler("question", ctx);
+     const args = harness.execCalls.at(-1)!.args;
+     assert.ok(!args.includes("--no-session"));
+     assert.ok(args.includes("--session-dir"));
+     assert.ok(args.includes("--no-extensions"));
+     const path = args[args.indexOf("--session-dir") + 1]!;
+     assert.ok(path.includes(store.created.at(-1)!.launchId));
+     dirs.add(path);
+     assert.equal(store.created.at(-1)?.config.shareKey, key);
+     assert.equal(store.created.at(-1)?.config.shareHeader, header);
+    }
+    assert.equal(dirs.size, 3);
+    const count = harness.execCalls.length;
+    await harness.commands.get("btw")!.handler("question", { ...createCommandContext(), isIdle: () => false });
+    assert.equal(harness.execCalls.length, count);
+   } finally { harness.cleanup(); }
+  });
+ } finally {
+  if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = previous;
+  await rm(dir, { recursive: true, force: true });
+ }
+});
+
+test("snapshot initialization failure blocks user input and the auto-submit sentinel", async () => {
+ await withChildEnvironment("/tmp/pi-herdr-btw-test/launch-123/payload.json", async () => {
+  const store = new FakeStore();
+  store.readValue = fixturePayload({ config: { ...DEFAULT_CONFIG, persistent: true, autoSubmit: true }, draftQuestion: "must not submit" });
+  const harness = await createHarness(store, herdrExec());
+  try {
+   const ctx = createCommandContext();
+   Object.assign(ctx.sessionManager, { getSessionDir: () => undefined });
+   Object.assign(ctx, { mode: "rpc" });
+   await harness.emit("session_start", { reason: "startup" }, ctx);
+   assert.match(ctx.notifications.at(-1)?.message ?? "", /snapshot initialization failed/i);
+   const input = await harness.emit("input", { text: "question", source: "interactive" }, ctx);
+   assert.ok(input.some((result: any) => result?.action === "handled"));
+   await harness.commands.get("btw")!.handler("--launch-draft", ctx);
+   assert.deepEqual(harness.sentUserMessages, []);
+  } finally { harness.cleanup(); }
+ });
+});

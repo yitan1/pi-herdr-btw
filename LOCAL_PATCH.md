@@ -97,3 +97,14 @@ Pi's global packages settings instead of a pinned Git release. Keep changes out
 of Pi-managed Git clones, which package reconciliation may reset. The development
 clone and deployed copy must be kept in sync. Without an exclusion policy,
 SoL-Pi's incompatibility with ephemeral sessions is unchanged.
+
+## Persistent side-session storage
+
+`persistent` is a per-machine BTW setting, false by default. It does not change
+cache-sharing defaults or extension policies. See the README for enabling it.
+Storage is under `<agentDir>/btw-sessions/<launchId>/`, separate from the temporary
+mailbox's stale cleanup. The parent must be idle to snapshot observations.
+Snapshot files are independent copies with a SHA-256 manifest, private modes,
+regular-file/no-symlink validation, and a 512 MiB total bound. Initialization
+checks the actual child session directory and refuses conflicting existing objects.
+No automatic persistent-data cleanup or stand-alone BTW resume is provided yet.

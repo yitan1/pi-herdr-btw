@@ -110,3 +110,40 @@ format remains supported. Configuration is local and is not synced by Git.
 This applies equally to `/btw`, `/btw1`, and `/btw2`; cache-sharing behavior is
 unchanged. See [maintenance notes](LOCAL_PATCH.md#per-machine-side-thread-extension-policy)
 for trust, discovery, and deployment details.
+
+### Optional persistent side sessions (Observation Pack compatibility)
+
+The default remains ephemeral. Enable on each machine with:
+
+```text
+/btw config persistent on
+```
+
+This applies to `/btw`, `/btw1`, and `/btw2`. Persistent children use
+`<agentDir>/btw-sessions/<launchId>/sessions` instead of `--no-session`.
+Before splitting a pane, BTW snapshots the idle parent's SoL-Pi Observation Pack
+`objects/` into a private per-launch directory. Before the child's first request,
+verified copies are installed under the child's own `sol-pi/<sessionId>/`
+runtime directory. Existing observation IDs therefore remain recallable without
+sharing the parent's writable state. No SoL-Pi source changes are required.
+Parent journals and reducer state are NOT copied. Missing Observation Pack data
+is valid; copying or verification failures block the launch/child input.
+Snapshots are capped at 512 MiB; they are never silently truncated.
+
+For matching tool availability, use extension policy `mode: "inherit"` (the
+shipped template). In persistent mode inherited extensions are resolved explicitly
+and BTW is placed first, so it injects parent history before other context hooks
+such as Observation Pack. As with named policies, parent CLI-only `-e` extensions
+are not discovered. Cache reuse remains experimental: context transforms and tool
+schemas can differ even with identical tool names; confirm with provider usage.
+
+These directories contain full tool outputs and child transcripts. They are kept
+on disk after exit, including completed snapshots from failed launches; automatic
+cleanup is deliberately not implemented. Delete a launch directory manually only
+after its child has stopped and any merge has completed. Persistent storage does
+not yet provide standalone resumable BTW context: the parent snapshot/merge
+protocol still uses the existing temporary payload mailbox.
+
+Disable for future launches with `/btw config persistent off`. Existing side
+threads and saved data are not changed. Persistent mode supports Observation Pack
+object inheritance only, not a generic migration of all SoL-Pi runtime state.
