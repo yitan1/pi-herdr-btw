@@ -13,6 +13,7 @@ import {
 	type BtwConfig,
 } from "./src/config.ts";
 import { ContextStore } from "./src/context-store.ts";
+import { loadChildExtensions } from "./src/child-extensions.ts";
 import {
 	buildAgentStartArgs,
 	buildContextDocument,
@@ -542,6 +543,8 @@ export async function registerBtwExtension(
 
 			let payloadPath: string | undefined;
 			try {
+				// Validate the local allowlist before creating payloads or splitting a pane.
+				const childExtensions = await loadChildExtensions();
 				const storedConfig: BtwConfig = await configStore.load();
 				const config: BtwConfig = override ? { ...storedConfig, ...override } : storedConfig;
 				await store.removeStale();
@@ -577,6 +580,7 @@ export async function registerBtwExtension(
 				);
 
 				const launchOptions: HerdrLaunchOptions = {
+					childExtensions,
 					paneName: `btw-${sessionId.slice(0, 6)}-${Date.now().toString(36).slice(-4)}`,
 					cwd: ctx.cwd,
 					parentPaneId: process.env.HERDR_PANE_ID,

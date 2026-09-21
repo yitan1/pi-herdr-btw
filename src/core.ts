@@ -84,6 +84,8 @@ export type HerdrLaunchOptions = {
 	split: BtwSplit;
 	/** Optional initial message for the child pi, processed after initial render. */
 	initialMessage?: string;
+	/** Explicit child extension allowlist. Undefined preserves automatic discovery. */
+	childExtensions?: string[];
 };
 
 export type LaunchResult = {
@@ -256,6 +258,9 @@ export function buildAgentStartArgs(options: HerdrLaunchOptions, paneId: string)
 		paneId,
 		"--",
 		"--no-session",
+		...(options.childExtensions === undefined
+			? []
+			: ["--no-extensions", ...options.childExtensions.flatMap((path) => ["-e", path])]),
 		"--model",
 		options.model,
 		"--thinking",

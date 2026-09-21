@@ -58,3 +58,21 @@ The first custom release preserves the installed runtime TypeScript files
 unchanged. It adds regression tests for aliases, configuration, supported APIs,
 fallback behavior, header conflicts and the environment kill switch. Tests mock
 Herdr and provider calls; they do not measure real API cache hits.
+
+## Local side-thread extension allowlist
+
+Optional `~/.pi/agent/pi-herdr-btw-extensions.json` (or under Pi's custom agent
+ directory) is a JSON array of absolute local extension paths. When present,
+BTW launches children with `--no-extensions` and repeated `-e` arguments. BTW's
+own entry point is always included; duplicate resolved paths are removed.
+Missing configuration preserves automatic discovery. Invalid JSON, relative
+paths, or inaccessible entries abort before a pane is created. This only
+controls extensions, not skills, prompts, or themes. Parent discovery is unchanged.
+
+The local deployment is `~/.pi/agent/local-packages/pi-herdr-btw`, selected in
+Pi's global packages setting instead of the pinned Git release. It is a snapshot,
+not a symlink: source edits must be tested and copied there to take effect.
+This prevents package reconciliation from overwriting the patch. The original
+managed Git clone and SoL-Pi source are not modified. Reload the parent before
+opening a new side thread. Remove the allowlist to restore automatic child
+extension discovery (which reintroduces the SoL-Pi ephemeral-session conflict).
