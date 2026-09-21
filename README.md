@@ -90,3 +90,23 @@ npm run pack:check
 ## License
 
 MIT
+
+### Per-machine side-thread extensions
+
+Copy `child-extensions.example.json` to
+`~/.pi/agent/pi-herdr-btw-extensions.json` (or your custom Pi agent directory).
+The shipped template uses `mode: "inherit"` and empty `allowlist` / `denylist`:
+no extensions are excluded or hard-coded by default.
+
+Use `mode: "allowlist"` to load only named enabled extensions, or
+`mode: "denylist"` to exclude named enabled extensions. Entries may be package
+names, local extension file stems, configured package sources, or absolute
+entry-point paths. `onMissing: "warn"` skips unmatched allowlist entries with a
+warning; `"error"` blocks the launch. Missing denylist entries are harmless.
+BTW itself is always included. An empty allowlist loads only BTW; an empty
+ denylist keeps all discovered enabled extensions. The old absolute-path array
+format remains supported. Configuration is local and is not synced by Git.
+
+This applies equally to `/btw`, `/btw1`, and `/btw2`; cache-sharing behavior is
+unchanged. See [maintenance notes](LOCAL_PATCH.md#per-machine-side-thread-extension-policy)
+for trust, discovery, and deployment details.

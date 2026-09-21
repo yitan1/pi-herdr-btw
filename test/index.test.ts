@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG, type BtwConfig } from "../src/config.ts";
 import type { BtwPayload } from "../src/core.ts";
@@ -1050,4 +1053,34 @@ for (const scenario of [
 			else process.env.PI_HERDR_BTW_SHARE_CACHE_KEY = old;
 		}
 	});
+}
+
+for (const mode of ["allowlist", "denylist"] as const) {
+ test(`all BTW aliases preserve launch sharing with ${mode} policy`, async () => {
+  const dir = await mkdtemp(join(tmpdir(), "btw-alias-policy-"));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = dir;
+  try {
+   await writeFile(join(dir, "pi-herdr-btw-extensions.json"), JSON.stringify({ mode, allowlist: [], denylist: [] }));
+   await withParentEnvironment(async () => {
+    const store = new FakeStore();
+    const harness = await createHarness(store, herdrExec());
+    try {
+     for (const [command, shareKey, shareHeader] of [["btw", false, false], ["btw1", true, false], ["btw2", true, true]] as const) {
+      await harness.commands.get(command)!.handler("question", createCommandContext());
+      const args = harness.execCalls.at(-1)!.args;
+      assert.ok(args.includes("--no-extensions"));
+      assert.ok(args.includes("-e"));
+      assert.ok(args.includes("--no-session"));
+      assert.equal(store.created.at(-1)?.config.shareKey, shareKey);
+      assert.equal(store.created.at(-1)?.config.shareHeader, shareHeader);
+     }
+    } finally { harness.cleanup(); }
+   });
+  } finally {
+   if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+   else process.env.PI_CODING_AGENT_DIR = previous;
+   await rm(dir, { recursive: true, force: true });
+  }
+ });
 }

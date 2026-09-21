@@ -544,7 +544,11 @@ export async function registerBtwExtension(
 			let payloadPath: string | undefined;
 			try {
 				// Validate the local allowlist before creating payloads or splitting a pane.
-				const childExtensions = await loadChildExtensions();
+				const childExtensions = await loadChildExtensions(undefined, undefined, {
+					cwd: ctx.cwd,
+					projectTrusted: ctx.isProjectTrusted?.() ?? false,
+					warn: (message) => ctx.ui.notify(message, "warning"),
+				});
 				const storedConfig: BtwConfig = await configStore.load();
 				const config: BtwConfig = override ? { ...storedConfig, ...override } : storedConfig;
 				await store.removeStale();

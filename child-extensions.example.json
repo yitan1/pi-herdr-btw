@@ -1,0 +1,6 @@
+{
+  "mode": "inherit",
+  "allowlist": [],
+  "denylist": [],
+  "onMissing": "warn"
+}

@@ -59,20 +59,41 @@ unchanged. It adds regression tests for aliases, configuration, supported APIs,
 fallback behavior, header conflicts and the environment kill switch. Tests mock
 Herdr and provider calls; they do not measure real API cache hits.
 
-## Local side-thread extension allowlist
+## Per-machine side-thread extension policy
 
-Optional `~/.pi/agent/pi-herdr-btw-extensions.json` (or under Pi's custom agent
- directory) is a JSON array of absolute local extension paths. When present,
-BTW launches children with `--no-extensions` and repeated `-e` arguments. BTW's
-own entry point is always included; duplicate resolved paths are removed.
-Missing configuration preserves automatic discovery. Invalid JSON, relative
-paths, or inaccessible entries abort before a pane is created. This only
-controls extensions, not skills, prompts, or themes. Parent discovery is unchanged.
+Copy `child-extensions.example.json` to
+`~/.pi/agent/pi-herdr-btw-extensions.json` (or Pi's custom agent directory).
+The repository template has empty allow/deny lists and `mode: "inherit"`;
+it contains no machine-specific extension preferences or paths.
 
-The local deployment is `~/.pi/agent/local-packages/pi-herdr-btw`, selected in
-Pi's global packages setting instead of the pinned Git release. It is a snapshot,
-not a symlink: source edits must be tested and copied there to take effect.
-This prevents package reconciliation from overwriting the patch. The original
-managed Git clone and SoL-Pi source are not modified. Reload the parent before
-opening a new side thread. Remove the allowlist to restore automatic child
-extension discovery (which reintroduces the SoL-Pi ephemeral-session conflict).
+- `inherit`: normal Pi extension discovery (also the default without a file).
+- `allowlist`: select only enabled installed extensions matching `allowlist`.
+  An empty list loads only BTW itself.
+- `denylist`: select enabled installed extensions except matches in `denylist`.
+  An empty list excludes nothing. New enabled extensions are automatically included.
+- `onMissing`: `warn` (default, skip with notification) or `error` for unmatched
+  allowlist selectors. Unmatched denylist selectors are harmless.
+
+Selectors match exact package names, configured package sources, local extension
+file stems, or absolute entry-point paths. A package name can select multiple
+entry points. Names matching multiple local entries select all matches; use an
+absolute path to narrow the selection. Matching is case-sensitive.
+
+Named policies use Pi's package resolver with the current project trust state;
+disabled resources stay disabled, untrusted project resources are not promoted,
+and missing packages are not installed. They do not capture extra extensions
+loaded solely via parent CLI `-e` arguments. BTW itself is always included and
+cannot be excluded. Invalid configuration fails before creating a pane.
+Legacy arrays of absolute paths retain their original strict validation behavior.
+Only extensions are filtered, not skills, prompts, themes, or built-in tools.
+
+All three commands (`/btw`, `/btw1`, `/btw2`) share this policy; their existing
+cache-sharing overrides remain unchanged. No policy is written automatically.
+Changes take effect on the next side-thread launch; reload the parent after code
+updates. Existing children are unaffected.
+
+Local deployment can use `~/.pi/agent/local-packages/pi-herdr-btw`, selected in
+Pi's global packages settings instead of a pinned Git release. Keep changes out
+of Pi-managed Git clones, which package reconciliation may reset. The development
+clone and deployed copy must be kept in sync. Without an exclusion policy,
+SoL-Pi's incompatibility with ephemeral sessions is unchanged.
