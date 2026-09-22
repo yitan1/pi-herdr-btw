@@ -4,8 +4,7 @@ export type BtwRoute =
 	| { kind: "config"; args: string }
 	| { kind: "merge"; text: string }
 	| { kind: "help" }
-	| { kind: "check" }
-	| { kind: "cleanup" };
+	| { kind: "check" };
 
 export const HELP_TEXT = `/btw usage:
 /btw                        open an empty side pane using saved defaults
@@ -13,15 +12,14 @@ export const HELP_TEXT = `/btw usage:
 /btw1 <question...>         open btw with shared cache key only
 /btw2 <question...>         open btw with shared cache key and session header
 /btw ask <question...>      explicit form for questions starting with a reserved word
-/btw config [...]           show or change defaults (persistent, auto-submit, share-key, share-header, model, thinking, tools, split, reset)
+/btw config [...]           show or change defaults (auto-submit, share-key, share-header, model, thinking, tools, split, reset)
 /btw merge <prompt...>      fold this side thread into the parent and continue with the prompt
 /btw check                  show inheritance diagnostics without a model request
-/btw cleanup                delete Ready records or force-delete other records from the same menu
 /btw help                   show this grammar`;
 
 /**
  * Exact first-word routing. Only the reserved words `ask`, `config`, `merge`,
- * `check`, `cleanup`, and `help` are subcommands; any other first word keeps the whole input as a
+ * `check`, and `help` are subcommands; any other first word keeps the whole input as a
  * question. `/btw ask ...` is the escape hatch for questions that begin with a
  * reserved word.
  */
@@ -40,8 +38,6 @@ export function parseBtwCommand(input: string): BtwRoute {
 			return { kind: "config", args: rest };
 		case "merge":
 			return { kind: "merge", text: rest };
-		case "cleanup":
-			return { kind: "cleanup" };
 		case "check":
 			return { kind: "check" };
 		case "help":
@@ -59,7 +55,6 @@ export function getBtwArgumentCompletions(prefix: string, child = false) {
 		? [
 			["merge", "Merge this side thread into the parent"],
 			["check", "Show inheritance diagnostics"],
-			["cleanup", "Delete Ready records or force-delete other records"],
 			["help", "Show command help"],
 		]
 		: [
@@ -67,7 +62,6 @@ export function getBtwArgumentCompletions(prefix: string, child = false) {
 			["config", "Show or change defaults"],
 			["merge", "Check pending side-thread merges"],
 			["check", "Show request baseline status"],
-			["cleanup", "Delete Ready records or force-delete other records"],
 			["help", "Show command help"],
 		];
 	const items = commands.filter(([value]) => value!.startsWith(argument))

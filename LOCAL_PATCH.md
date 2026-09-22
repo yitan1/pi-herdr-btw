@@ -96,18 +96,16 @@ Local deployment can use `~/.pi/agent/local-packages/pi-herdr-btw`, selected in
 Pi's global packages settings instead of a pinned Git release. Keep changes out
 of Pi-managed Git clones, which package reconciliation may reset. The development
 clone and deployed copy must be kept in sync. Without an exclusion policy,
-SoL-Pi's incompatibility with ephemeral sessions is unchanged.
+SoL-Pi Observation Pack's incompatibility with ephemeral sessions is unchanged.
 
-## Persistent side-session storage
+## Ephemeral-only side sessions
 
-`persistent` is a per-machine BTW setting, false by default. It does not change
-cache-sharing defaults or extension policies. See the README for enabling it.
-Storage is under `<agentDir>/btw-sessions/<launchId>/`, separate from the temporary
-mailbox's stale cleanup. The parent must be idle to snapshot observations.
-Snapshot files are independent copies with a SHA-256 manifest, private modes,
-regular-file/no-symlink validation, and a 512 MiB total bound. Initialization
-checks the actual child session directory and refuses conflicting existing objects.
-No automatic persistent-data cleanup or stand-alone BTW resume is provided yet.
+All child launches use `--no-session`. Persistent session directories, parent
+Observation Pack copies, lifecycle metadata, and the manual cleanup command have
+been removed. Legacy `persistent` config values are ignored and omitted on save.
+The existing temporary payload/mailbox protocol and its cleanup remain intact.
+Existing user data under `btw-sessions/` is not removed by this code migration.
+Action Fusion does not require persistent storage; Observation Pack still does.
 
 ## Request inheritance diagnostics
 
@@ -118,16 +116,3 @@ the first supported request against the parent baseline. `/btw check` is local.
 No final-hook ordering guarantee is assumed; the README documents BTW's
 observation point. The diagnostic does not mutate provider bodies or cache policy.
 See README limitations before interpreting a match as a cache-hit guarantee.
-
-## Manual persistent-record cleanup
-
-`/btw cleanup` uses one-click deletion for Ready records, with no model calls or
-second confirmation. The top action deletes all listed Ready records; each is
-rechecked under its lifecycle lock. New child sessions
-record running/closed lifecycle metadata; shutdown preserves durable files.
-Only confirmed closed records with a dead local PID and no pending merge are
-eligible for ordinary/bulk deletion. Other rows offer individual Force delete
-with one risk confirmation in the same menu. Force bypasses state eligibility,
-not path safety or lifecycle locks. A shared per-launch lock protects
-startup and final deletion checks. Manual deletion removes only the persistent
-launch directory; mailbox TTL cleanup and parent runtime data are unchanged.

@@ -20,7 +20,7 @@ test("only exact reserved first words route to subcommands", () => {
 	});
 	assert.deepEqual(parseBtwCommand("help"), { kind: "help" });
 	assert.deepEqual(parseBtwCommand("check"), { kind: "check" });
-	assert.deepEqual(parseBtwCommand("cleanup"), { kind: "cleanup" });
+	assert.deepEqual(parseBtwCommand("cleanup"), { kind: "ask", question: "cleanup" });
 	assert.deepEqual(parseBtwCommand("ask cleanup old records"), { kind: "ask", question: "cleanup old records" });
 });
 
@@ -42,20 +42,20 @@ test("/btw ask is the escape hatch for reserved words", () => {
 });
 
 test("help text covers the full grammar", () => {
-	for (const token of ["ask", "config", "merge", "help", "check", "cleanup"]) {
+	for (const token of ["ask", "config", "merge", "help", "check"]) {
 		assert.match(HELP_TEXT, new RegExp(`/btw ${token}`));
 	}
 });
 
 
-test("subcommand completion includes cleanup/check and leaves question text alone", () => {
- assert.deepEqual(getBtwArgumentCompletions("cl")?.map((item) => item.value), ["cleanup"]);
+test("subcommand completion includes check and leaves question text alone", () => {
+ assert.equal(getBtwArgumentCompletions("cl"), null);
  assert.deepEqual(getBtwArgumentCompletions("ch")?.map((item) => item.value), ["check"]);
  assert.ok(getBtwArgumentCompletions("")?.some((item) => item.value === "config"));
  assert.equal(getBtwArgumentCompletions("check this code"), null);
  assert.equal(getBtwArgumentCompletions("cleanup "), null);
  assert.equal(getBtwArgumentCompletions("unknown"), null);
- assert.deepEqual(getBtwArgumentCompletions("cl", true)?.map((item) => item.value), ["cleanup"]);
+ assert.equal(getBtwArgumentCompletions("cl", true), null);
  assert.equal(getBtwArgumentCompletions("config", true), null);
  assert.ok(getBtwArgumentCompletions("", true)?.some((item) => item.value === "merge"));
 });

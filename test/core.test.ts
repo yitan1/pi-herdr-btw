@@ -218,3 +218,15 @@ test("safeErrorText extracts the message from Herdr JSON error responses", () =>
 	// JSON without an error message falls back to the raw text
 	assert.equal(safeErrorText("", '{"result":{}}'), '{"result":{}}');
 });
+
+test("all child launches are ephemeral even if an old caller supplies a sessionDir", () => {
+ const options = {
+  paneName: "btw-test", cwd: "/tmp", payloadPath: "/tmp/payload.json", model: "provider/model",
+  thinkingLevel: "off", toolMode: "inherit" as const, activeTools: ["read"], split: "right" as const,
+  sessionDir: "/legacy/persistent/session/path",
+ };
+ const args = buildAgentStartArgs(options, "pane");
+ assert.ok(args.includes("--no-session"));
+ assert.ok(!args.includes("--session-dir"));
+ assert.ok(!args.includes(options.sessionDir));
+});

@@ -75,3 +75,10 @@ test("cache sharing is opt-in, validated, configurable and resettable", () => {
 	assert.throws(() => applyConfigCommand(config, "share-key yes"), /btw config/);
 	assert.throws(() => applyConfigCommand(config, "share-header yes"), /btw config/);
 });
+
+test("legacy persistence settings are ignored and the removed command is rejected", () => {
+ assert.deepEqual(parseConfig({ persistent: true }), { ...DEFAULT_CONFIG });
+ assert.deepEqual(parseConfig({ persistent: false }), { ...DEFAULT_CONFIG });
+ assert.equal(Object.hasOwn(parseConfig({ persistent: true }), "persistent"), false);
+ assert.throws(() => applyConfigCommand({ ...DEFAULT_CONFIG }, "persistent on"));
+});

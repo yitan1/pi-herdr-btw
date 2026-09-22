@@ -111,48 +111,30 @@ This applies equally to `/btw`, `/btw1`, and `/btw2`; cache-sharing behavior is
 unchanged. See [maintenance notes](LOCAL_PATCH.md#per-machine-side-thread-extension-policy)
 for trust, discovery, and deployment details.
 
-### Optional persistent side sessions (Observation Pack compatibility)
+### Ephemeral side sessions
 
-The default remains ephemeral. Enable on each machine with:
+All side threads (`/btw`, `/btw1`, `/btw2`) launch with `--no-session`.
+The former persistent-session option, Observation Pack snapshots, lifecycle
+tracking, and `/btw cleanup` command have been removed. Legacy `persistent`
+settings are ignored on load and omitted when settings are saved.
 
-```text
-/btw config persistent on
-```
+The normal private temporary parent-context/merge mailbox remains necessary and
+retains its existing acknowledgement-aware exit cleanup and stale cleanup.
+No new `btw-sessions` directories or SoL-Pi object copies are created. Existing
+`<agentDir>/btw-sessions/` records are left untouched; remove them manually only
+once their side threads have stopped and any needed merges/data are preserved.
 
-This applies to `/btw`, `/btw1`, and `/btw2`. Persistent children use
-`<agentDir>/btw-sessions/<launchId>/sessions` instead of `--no-session`.
-Before splitting a pane, BTW snapshots the idle parent's SoL-Pi Observation Pack
-`objects/` into a private per-launch directory. Before the child's first request,
-verified copies are installed under the child's own `sol-pi/<sessionId>/`
-runtime directory. Existing observation IDs therefore remain recallable without
-sharing the parent's writable state. No SoL-Pi source changes are required.
-Parent journals and reducer state are NOT copied. Missing Observation Pack data
-is valid; copying or verification failures block the launch/child input.
-Snapshots are capped at 512 MiB; they are never silently truncated.
-
-For matching tool availability, use extension policy `mode: "inherit"` (the
-shipped template). In persistent mode inherited extensions are resolved explicitly
-and BTW is placed first, so it injects parent history before other context hooks
-such as Observation Pack. As with named policies, parent CLI-only `-e` extensions
-are not discovered. Cache reuse remains experimental: context transforms and tool
-schemas can differ even with identical tool names; confirm with provider usage.
-
-These directories contain full tool outputs and child transcripts. They are kept
-on disk after exit, including completed snapshots from failed launches; automatic
-cleanup is deliberately not implemented. Delete a launch directory manually only
-after its child has stopped and any merge has completed. Persistent storage does
-not yet provide standalone resumable BTW context: the parent snapshot/merge
-protocol still uses the existing temporary payload mailbox.
-
-Disable for future launches with `/btw config persistent off`. Existing side
-threads and saved data are not changed. Persistent mode supports Observation Pack
-object inheritance only, not a generic migration of all SoL-Pi runtime state.
+SoL-Pi with only Action Fusion enabled can still be loaded in both parent and
+child. Observation Pack requires a persistent session directory and is not
+supported in ephemeral side threads. Do not re-enable it in the child without
+changing the extension policy. Old observation references may no longer be
+recallable once that feature is disabled.
 
 ### Inheritance diagnostics
 
 `/btw check` displays diagnostics locally without a model call. In a parent it
 reports whether a recent request baseline exists; in a child it shows parent-data
-integrity, Observation Pack installation status, and the first-request comparison.
+integrity and the first-request comparison.
 `check` is now a reserved first word: use `/btw ask check ...` for a question.
 
 The parent fingerprints each supported request and retains only its latest
@@ -177,11 +159,11 @@ mismatches are reported explicitly; they do not alter cache sharing or block an
 otherwise valid conversation. Parent-data integrity failure still blocks input.
 Actual cache hits must be confirmed from provider usage.
 
-The display reports fingerprint/comparison time, excluding snapshot disk copying,
-payload integrity verification, and network latency. Diagnostics themselves do
+The display reports fingerprint/comparison time, excluding payload integrity
+verification and network latency. Diagnostics themselves do
 not send additional API requests.
 
-The persistent status widget is a single English line, for example:
+The status widget is a single English line, for example:
 
 ```text
 BTW · Check pending
@@ -193,41 +175,4 @@ BTW · Unverified: no parent baseline
 Sharing markers reflect applied request hints, not merely saved preferences.
 Header conflicts remain visible. `/btw check` shows concise English details;
 request-scope and cache-hit caveats are documented here rather than repeated in
-the UI. Data-load and snapshot failures retain their explicit error messages.
-
-### Manual cleanup
-
-Run `/btw cleanup` in an interactive Pi window. It lists persistent side-thread
-records by creation time, size, status, and launch ID. Select **Delete all Ready**
-to remove all eligible records in one action, or select an individual **Delete**
-row. Ready deletion is immediate and permanent; there is no second confirmation.
-Other records appear as **Force delete** rows in the same list. Selecting one
-asks for a single risk confirmation; no separate command or submenu is needed.
-Escape/cancel never deletes anything. `cleanup` is
-now reserved; use `/btw ask cleanup ...` to ask a question with that first word.
-
-- **Ready**: a normal exit was recorded, the owning process is gone, and no merge
-  remains unacknowledged. These records can be selected for deletion.
-- **Running**: the recorded process still exists (including conservative PID reuse).
-- **Pending merge**: the closed thread still has an unacknowledged merge request.
-- **Unknown**: legacy/missing metadata, abnormal exit, missing merge evidence,
-  another host, unsafe files, or an in-progress/stale lifecycle lock. Not included
-  in bulk deletion.
-
-New persistent children write a private `lifecycle.json` at startup and normal
-quit. Closing a thread does NOT delete its persistent data. Old records have no
-reliable lifecycle evidence and are intentionally not automatically classified
-as safe; the same menu offers individual force deletion after confirmation.
-
-Deletion rechecks lifecycle and merge state while holding a lock shared with
-child startup. Only that launch's `btw-sessions/<launchId>/` directory is removed.
-Parent SoL-Pi data and temporary mailboxes are not touched. Existing automatic
-mailbox cleanup is unchanged. Copied merge text can still refer to child-only
-observation IDs; deleting the child record also removes those objects. Keep the record if you still need them.
-
-There is no scheduled cleanup or bulk-force action. Bulk deletion only considers
-records listed as Ready and rechecks each one before deleting. Force deletion
-bypasses lifecycle/merge eligibility only: path containment, ownership, symlink
-checks, and lifecycle locks still apply. A running thread is not stopped and may
-fail or recreate files after deletion. Pending merges may lose referenced child
-data; their temporary mailboxes are not removed.
+the UI. Parent-data load failures retain their explicit error messages.

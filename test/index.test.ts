@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG, type BtwConfig } from "../src/config.ts";
-import { ContextStore } from "../src/context-store.ts";
-import { preparePersistentSession } from "../src/persistent-session.ts";
 import { captureRequest } from "../src/inheritance-check.ts";
 import type { BtwPayload } from "../src/core.ts";
 import {
@@ -1089,65 +1087,6 @@ for (const mode of ["allowlist", "denylist"] as const) {
  });
 }
 
-test("persistent aliases use separate durable directories and retain sharing overrides", async () => {
- const dir = await mkdtemp(join(tmpdir(), "btw-persistent-alias-"));
- const previous = process.env.PI_CODING_AGENT_DIR;
- process.env.PI_CODING_AGENT_DIR = dir;
- try {
-  await withParentEnvironment(async () => {
-   const store = new FakeStore();
-   const config = new FakeConfigStore();
-   config.config.persistent = true;
-   const harness = await createHarness(store, herdrExec(), config);
-   try {
-    const dirs = new Set<string>();
-    for (const [command, key, header] of [["btw", false, false], ["btw1", true, false], ["btw2", true, true]] as const) {
-     const ctx = createCommandContext();
-     Object.assign(ctx.sessionManager, { getSessionDir: () => undefined });
-     await harness.commands.get(command)!.handler("question", ctx);
-     const args = harness.execCalls.at(-1)!.args;
-     assert.ok(!args.includes("--no-session"));
-     assert.ok(args.includes("--session-dir"));
-     assert.ok(args.includes("--no-extensions"));
-     const path = args[args.indexOf("--session-dir") + 1]!;
-     assert.ok(path.includes(store.created.at(-1)!.launchId));
-     dirs.add(path);
-     assert.equal(store.created.at(-1)?.config.shareKey, key);
-     assert.equal(store.created.at(-1)?.config.shareHeader, header);
-    }
-    assert.equal(dirs.size, 3);
-    const count = harness.execCalls.length;
-    await harness.commands.get("btw")!.handler("question", { ...createCommandContext(), isIdle: () => false });
-    assert.equal(harness.execCalls.length, count);
-   } finally { harness.cleanup(); }
-  });
- } finally {
-  if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
-  else process.env.PI_CODING_AGENT_DIR = previous;
-  await rm(dir, { recursive: true, force: true });
- }
-});
-
-test("snapshot initialization failure blocks user input and the auto-submit sentinel", async () => {
- await withChildEnvironment("/tmp/pi-herdr-btw-test/launch-123/payload.json", async () => {
-  const store = new FakeStore();
-  store.readValue = fixturePayload({ config: { ...DEFAULT_CONFIG, persistent: true, autoSubmit: true }, draftQuestion: "must not submit" });
-  const harness = await createHarness(store, herdrExec());
-  try {
-   const ctx = createCommandContext();
-   Object.assign(ctx.sessionManager, { getSessionDir: () => undefined });
-   Object.assign(ctx, { mode: "rpc" });
-   await harness.emit("session_start", { reason: "startup" }, ctx);
-   assert.match(ctx.notifications.at(-1)?.message ?? "", /snapshot initialization failed/i);
-   const input = await harness.emit("input", { text: "question", source: "interactive" }, ctx);
-   assert.ok(input.some((result: any) => result?.action === "handled"));
-   await harness.commands.get("btw")!.handler("--launch-draft", ctx);
-   assert.deepEqual(harness.sentUserMessages, []);
-  } finally { harness.cleanup(); }
- });
-});
-
-
 test("parent /btw check is local, aliases carry the current request baseline, other sessions do not", async () => {
  await withParentEnvironment(async () => {
   const store = new FakeStore();
@@ -1247,76 +1186,16 @@ test("child uses one English status line and reports actual sharing and header c
  });
 });
 
-test("cleanup routes locally for all parent aliases before any model or Herdr launch checks", async () => {
- const agent = await mkdtemp(join(tmpdir(), "btw-cleanup-command-"));
- const previous = process.env.PI_CODING_AGENT_DIR;
- process.env.PI_CODING_AGENT_DIR = agent;
- try {
-  await withParentEnvironment(async () => {
-   const harness = await createHarness(new FakeStore(), herdrExec());
-   try {
-    const ctx = createCommandContext();
-    ctx.model = undefined;
-    for (const command of ["btw", "btw1", "btw2"]) {
-     await harness.commands.get(command)!.handler("cleanup", ctx);
-     assert.equal(ctx.notifications.at(-1)?.message, "No persistent BTW records.");
-    }
-    assert.deepEqual(harness.execCalls, []);
-    assert.deepEqual(harness.sentUserMessages, []);
-   } finally { harness.cleanup(); }
-  });
- } finally {
-  if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
-  await rm(agent, { recursive: true, force: true });
- }
-});
-
-
-test("persistent session hooks record closure without deleting the durable transcript or snapshot", async () => {
- const agent = await mkdtemp(join(tmpdir(), "btw-cleanup-hooks-"));
- const previous = process.env.PI_CODING_AGENT_DIR;
- process.env.PI_CODING_AGENT_DIR = agent;
- const realStore = new ContextStore();
- let mailbox: string | undefined;
- try {
-  const payload = fixturePayload({ launchId: "hook-test", config: { ...DEFAULT_CONFIG, persistent: true } });
-  const sessionDir = await preparePersistentSession(payload.launchId, undefined, payload.parentSessionId, agent);
-  mailbox = await realStore.create(payload);
-  await withChildEnvironment(mailbox, async () => {
-   const fakeStore = new FakeStore(); fakeStore.readValue = payload;
-   const harness = await createHarness(fakeStore, herdrExec());
-   try {
-    const ctx = createCommandContext();
-    ctx.mode = "rpc";
-    Object.assign(ctx.sessionManager, { getSessionDir: () => sessionDir, getSessionId: () => "child-id" });
-    await harness.emit("session_start", { reason: "startup" }, ctx);
-    const stateFile = join(agent, "btw-sessions", payload.launchId, "lifecycle.json");
-    assert.equal(JSON.parse(await readFile(stateFile, "utf8")).state, "running");
-    await harness.emit("session_shutdown", { reason: "quit" }, ctx);
-    const state = JSON.parse(await readFile(stateFile, "utf8"));
-    assert.equal(state.state, "closed"); assert.equal(state.merge, "none");
-    assert.equal(await readFile(join(agent, "btw-sessions", payload.launchId, "observations.json"), "utf8"), "[]");
-    assert.deepEqual(fakeStore.removed, [mailbox]);
-   } finally { harness.cleanup(); }
-  });
- } finally {
-  if (mailbox) await realStore.remove(mailbox);
-  if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;
-  await rm(agent, { recursive: true, force: true });
- }
-});
-
-
-test("cleanup completion is registered for all parent aliases and the child command", async () => {
+test("check completion is registered for all parent aliases and the child command", async () => {
  await withParentEnvironment(async () => {
   const harness = await createHarness(new FakeStore(), herdrExec());
   try {
-   for (const name of ["btw", "btw1", "btw2"]) assert.deepEqual(harness.commands.get(name)?.getArgumentCompletions?.("cl")?.map((item) => item.value), ["cleanup"]);
+   for (const name of ["btw", "btw1", "btw2"]) assert.deepEqual(harness.commands.get(name)?.getArgumentCompletions?.("ch")?.map((item) => item.value), ["check"]);
   } finally { harness.cleanup(); }
  });
  await withChildEnvironment("/tmp/pi-herdr-btw-test/launch-123/payload.json", async () => {
   const harness = await createHarness(new FakeStore(), herdrExec());
-  try { assert.deepEqual(harness.commands.get("btw")?.getArgumentCompletions?.("cl")?.map((item) => item.value), ["cleanup"]); }
+  try { assert.deepEqual(harness.commands.get("btw")?.getArgumentCompletions?.("ch")?.map((item) => item.value), ["check"]); }
   finally { harness.cleanup(); }
  });
 });

@@ -1,5 +1,4 @@
 import { captureRequest, compareRequests, fingerprint, formatInheritanceReport, formatInheritanceStatus, type RequestFingerprint, type InheritanceReport } from "./src/inheritance-check.ts";
-import { markPersistentRunning, markPersistentClosed, showCleanup } from "./src/cleanup.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -16,7 +15,6 @@ import {
 } from "./src/config.ts";
 import { ContextStore } from "./src/context-store.ts";
 import { loadChildExtensions } from "./src/child-extensions.ts";
-import { preparePersistentSession, installParentObservations } from "./src/persistent-session.ts";
 import {
 	buildAgentStartArgs,
 	buildContextDocument,
@@ -121,7 +119,6 @@ async function configureChild(
 		payloadError = error instanceof Error ? error.message : String(error);
 	}
 
-	const persistentLaunchId = payload?.config.persistent ? payload.launchId : undefined;
 	const contextDocument = payload
 		? buildContextDocument(
 				payload.metadata,
@@ -132,7 +129,6 @@ async function configureChild(
 	const cache: CacheMode = { mode: "fallback", reason: "not yet negotiated" };
 	let inheritanceReport: InheritanceReport | undefined;
 	let inheritanceChecked = false;
-	let observationStatus = payload?.config.persistent ? "Observations: pending" : "Observations: not enabled";
 	let sharedKey = false;
 	let sharedHeader = false;
 	let headerConflict = false;
@@ -141,7 +137,7 @@ async function configureChild(
 	}
 	function inheritanceSummary(): string {
 		const loaded = payload ? `Parent context: ${payload.messages.length} messages, ${payload.parentContextHash ? "integrity OK" : "integrity unchecked (legacy)"}` : "Parent context: load failed";
-		return `${loaded}\n${observationStatus}\n${formatInheritanceReport(inheritanceReport)}\nShared: ${sharingLabel()}${headerConflict ? "\nWarning: session-id header conflict" : ""}`;
+		return `${loaded}\n${formatInheritanceReport(inheritanceReport)}\nShared: ${sharingLabel()}${headerConflict ? "\nWarning: session-id header conflict" : ""}`;
 	}
 	type StatusUI = { setWidget(name: string, lines: string[] | undefined): void };
 	let widgetUi: StatusUI | undefined;
@@ -290,10 +286,6 @@ async function configureChild(
 				return;
 			}
 			const route = parseBtwCommand(args);
-			if (route.kind === "cleanup") {
-				await showCleanup(ctx);
-				return;
-			}
 			if (route.kind === "check") {
 				ctx.ui.notify(inheritanceSummary(), "info");
 				return;
@@ -409,19 +401,7 @@ async function configureChild(
 		},
 	});
 
-	pi.on("session_start", async (event, ctx) => {
-		if (payload?.config.persistent) {
-			try {
-				await markPersistentRunning(payload.launchId, payloadPath);
-				const count = await installParentObservations(payload.launchId, ctx.sessionManager.getSessionDir(), ctx.sessionManager.getSessionId());
-				observationStatus = `Observations: ${count} ready`;
-			} catch (error) {
-				payloadError = `Observation snapshot initialization failed: ${error instanceof Error ? error.message : String(error)}`;
-				payload = undefined;
-				launchDraftPending = false;
-				ctx.ui.notify(payloadError, "error");
-			}
-		}
+	pi.on("session_start", (event, ctx) => {
 		if (ctx.mode !== "tui") return;
 		ctx.ui.setTitle("pi /btw — Herdr side thread");
 
@@ -453,8 +433,6 @@ async function configureChild(
 			ackTimer = undefined;
 		}
 		if (event.reason === "quit") {
-			// Record closure before the existing mailbox cleanup. Never delete durable data here.
-			if (persistentLaunchId) await markPersistentClosed(persistentLaunchId).catch(() => undefined);
 			// Acknowledgement-aware cleanup: an unacknowledged merge outlives the
 			// child (until ack or the stale TTL), so the parent can still import it.
 			await store.removeIfNoPendingMerge(payloadPath).catch(() => undefined);
@@ -541,10 +519,6 @@ export async function registerBtwExtension(
 			sessionCtx = ctx;
 			notifyFn = (message, type) => ctx.ui.notify(message, type);
 			const route = parseBtwCommand(args);
-			if (route.kind === "cleanup") {
-				await showCleanup(ctx);
-				return;
-			}
 			if (route.kind === "check") {
 				const baseline = parentRequestFingerprint?.sessionId === ctx.sessionManager.getSessionId() ? parentRequestFingerprint : undefined;
 				ctx.ui.notify(baseline ? `Parent baseline: ${baseline.inputHashes.length} items, ${baseline.captureMs.toFixed(2)} ms\nCaptured: ${baseline.capturedAt}\nRun /btw check in the side thread to compare.` : "No parent baseline. Send a parent message first.", "info");
@@ -622,11 +596,9 @@ export async function registerBtwExtension(
 			try {
 				const storedConfig: BtwConfig = await configStore.load();
 				const config: BtwConfig = override ? { ...storedConfig, ...override } : storedConfig;
-				if (config.persistent && !ctx.isIdle()) throw new Error("Wait for the parent turn to finish before taking a persistent BTW snapshot");
 				// Validate the local allowlist before creating payloads or splitting a pane.
 				const childExtensions = await loadChildExtensions(undefined, undefined, {
 					cwd: ctx.cwd,
-					forceExplicit: config.persistent,
 					projectTrusted: ctx.isProjectTrusted?.() ?? false,
 					warn: (message) => ctx.ui.notify(message, "warning"),
 				});
@@ -634,9 +606,6 @@ export async function registerBtwExtension(
 				const createdAt = new Date().toISOString();
 				const sessionId = ctx.sessionManager.getSessionId();
 				const launchId = randomUUID();
-				const sessionDir = config.persistent
-					? await preparePersistentSession(launchId, ctx.sessionManager.getSessionDir(), sessionId)
-					: undefined;
 				const model = `${ctx.model.provider}/${ctx.model.id}`;
 				const activeTools = pi.getActiveTools();
 				const thinkingLevel = pi.getThinkingLevel();
@@ -670,7 +639,6 @@ export async function registerBtwExtension(
 
 				const launchOptions: HerdrLaunchOptions = {
 					childExtensions,
-					sessionDir,
 					paneName: `btw-${sessionId.slice(0, 6)}-${Date.now().toString(36).slice(-4)}`,
 					cwd: ctx.cwd,
 					parentPaneId: process.env.HERDR_PANE_ID,
@@ -756,7 +724,7 @@ export async function registerBtwExtension(
 		// Pi has no argumentHint field for extension commands (only builtins and
 		// prompt templates); the TUI renders template hints as "hint — description",
 		// so we bake the same shape into the description.
-		description: "[question] — Open a side thread; ask, config, merge, check, cleanup, help",
+		description: "[question] — Open a side thread; ask, config, merge, check, help",
 		getArgumentCompletions: getBtwArgumentCompletions,
 		handler: (args, ctx) => handleBtw(args, ctx),
 	});
