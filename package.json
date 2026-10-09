@@ -25,6 +25,7 @@
     "index.ts",
     "src",
     "README.md",
+    "LOCAL_PATCH.md",
     "child-extensions.example.json",
     "LICENSE"
   ],
@@ -39,17 +40,18 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
-    "check": "npm run typecheck && npm test",
+    "check": "npm run typecheck && npm test && npm run test:local",
     "pack:check": "npm pack --dry-run",
-    "prepublishOnly": "npm run check && npm run pack:check"
+    "prepublishOnly": "npm run check && npm run pack:check",
+    "test:local": "node --test test/local.test.mjs"
   },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": ">=0.85.1",
-    "@earendil-works/pi-coding-agent": ">=0.85.1"
+    "@earendil-works/pi-agent-core": ">=1.1.0",
+    "@earendil-works/pi-coding-agent": ">=1.1.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-agent-core": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
     "@types/node": "^24.12.4",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"

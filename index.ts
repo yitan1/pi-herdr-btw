@@ -86,6 +86,9 @@ export function decideCacheMode(
 	payload: BtwPayload,
 	actual: { model: string | undefined; activeTools: string[]; thinkingLevel: string },
 ): CacheMode {
+	if (payload.messages[0]?.role !== "system") {
+		return { mode: "fallback", reason: "parent transcript has no leading system message (legacy payload)" };
+	}
 	if (payload.parentSystemPrompt === null) {
 		return { mode: "fallback", reason: "parent system prompt unavailable" };
 	}
@@ -93,7 +96,7 @@ export function decideCacheMode(
 		return { mode: "fallback", reason: "model differs from parent (configured override breaks the cache prefix)" };
 	}
 	if (payload.config.tools !== "inherit" || !sameStringArray(actual.activeTools, payload.parentActiveTools)) {
-		return { mode: "fallback", reason: "tool set differs from parent (tool prefix would not match)" };
+		return { mode: "fallback", reason: "tool set or order differs from parent (tool prefix would not match)" };
 	}
 	if (payload.config.thinking !== null || actual.thinkingLevel !== payload.parentThinkingLevel) {
 		return { mode: "fallback", reason: "thinking level differs from parent" };
@@ -129,21 +132,34 @@ async function configureChild(
 	const cache: CacheMode = { mode: "fallback", reason: "not yet negotiated" };
 	let inheritanceReport: InheritanceReport | undefined;
 	let inheritanceChecked = false;
+	let firstRun = true;
+	let toolRestore = "not attempted";
+	let actual: { model: string | undefined; activeTools: string[]; thinkingLevel: string } | undefined;
 	let sharedKey = false;
 	let sharedHeader = false;
 	let headerConflict = false;
 	function sharingLabel(): string {
 		return sharedKey && sharedHeader ? "key+header" : sharedKey ? "key" : sharedHeader ? "header" : "none";
 	}
-	function inheritanceSummary(): string {
+	function inheritanceSummary(ctx: { model?: { provider: string; id: string } }): string {
+		actual = { model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
+			activeTools: pi.getActiveTools(), thinkingLevel: pi.getThinkingLevel() };
+		const displayMode = firstRun && payload ? decideCacheMode(payload, actual) : cache;
 		const loaded = payload ? `Parent context: ${payload.messages.length} messages, ${payload.parentContextHash ? "integrity OK" : "integrity unchecked (legacy)"}` : "Parent context: load failed";
-		return `${loaded}\n${formatInheritanceReport(inheritanceReport)}\nShared: ${sharingLabel()}${headerConflict ? "\nWarning: session-id header conflict" : ""}`;
+		const diff = payload && actual ? [
+			`Model: parent ${payload.metadata.model}; child ${actual.model ?? "unavailable"}`,
+			`Thinking: parent ${payload.parentThinkingLevel}; child ${actual.thinkingLevel}`,
+			`Tools (ordered): parent [${payload.parentActiveTools.join(", ")}]; child [${actual.activeTools.join(", ")}]`,
+			`Missing active: ${payload.parentActiveTools.filter(t => !actual!.activeTools.includes(t)).join(", ") || "none"}; extra active: ${actual.activeTools.filter(t => !payload!.parentActiveTools.includes(t)).join(", ") || "none"}`,
+			`Tool order: ${sameStringArray(actual.activeTools, payload.parentActiveTools) ? "match" : "different"}; restore: ${toolRestore}`,
+		].join("\n") : "Child settings: not yet negotiated";
+		return `${loaded}\nContext mode: ${displayMode.mode}${displayMode.reason ? ` — ${displayMode.reason}` : ""}${firstRun ? " (pre-run; restoration pending)" : ""}\n${diff}\n${formatInheritanceReport(inheritanceReport)}\nShared: ${sharingLabel()}${headerConflict ? "\nWarning: session-id header conflict" : ""}`;
 	}
 	type StatusUI = { setWidget(name: string, lines: string[] | undefined): void };
 	let widgetUi: StatusUI | undefined;
 	function renderWidget(ui = widgetUi): void {
 		if (!ui || !payload) return;
-		const parts = ["BTW", formatInheritanceStatus(inheritanceReport)];
+		const parts = ["BTW", `Context: ${firstRun ? "pending" : cache.mode}`, formatInheritanceStatus(inheritanceReport)];
 		if (sharedKey || sharedHeader) parts.push(`Shared: ${sharingLabel()}`);
 		if (headerConflict) parts.push("Warning: header conflict");
 		if (payload.config.tools === "none") parts.push("tool-free");
@@ -160,18 +176,41 @@ async function configureChild(
 		sharedHeader = false;
 		headerConflict = false;
 		renderWidget(ctx.ui);
-		const decision = decideCacheMode(payload, {
+		// Only the first run may restore inheritance; never activate absent/hidden tools.
+		if (firstRun) {
+			firstRun = false;
+			if (payload.config.tools === "inherit" && !sameStringArray(pi.getActiveTools(), payload.parentActiveTools)) {
+				const registered = pi.getAllTools();
+				const missing = payload.parentActiveTools.filter(name => !registered.some(t => t.name === name && t.exposure !== "hidden"));
+				if (missing.length) {
+					const unregistered = missing.filter(name => !registered.some(t => t.name === name));
+					const hidden = missing.filter(name => registered.some(t => t.name === name && t.exposure === "hidden"));
+					toolRestore = `blocked: ${[
+						unregistered.length ? `unregistered [${unregistered.join(", ")}]` : "",
+						hidden.length ? `hidden [${hidden.join(", ")}]` : "",
+					].filter(Boolean).join("; ")}`;
+				}
+				else {
+					// Registered inactive direct tools (including pi-web-access) are
+					// selectable through Pi's supported API. Do not run web_enable:
+					// it adds ALL configured capabilities, not the parent's subset.
+					try {
+						pi.setActiveTools(payload.parentActiveTools);
+						toolRestore = sameStringArray(pi.getActiveTools(), payload.parentActiveTools)
+							? "restored exact parent loadout" : "attempted; resulting loadout differs";
+					}
+					catch { toolRestore = "failed"; }
+				}
+			} else toolRestore = payload.config.tools === "inherit" ? "already matched" : "disabled by config";
+		}
+		actual = {
 			model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
-			activeTools: pi.getActiveTools(),
-			thinkingLevel: pi.getThinkingLevel(),
-		});
+			activeTools: pi.getActiveTools(), thinkingLevel: pi.getThinkingLevel(),
+		};
+		const decision = decideCacheMode(payload, actual);
 		cache.mode = decision.mode;
 		cache.reason = decision.reason;
-		if (cache.mode === "native") {
-			// Replay the parent's exact system prompt; side-pane policy moves to
-			// a suffix message so the cached prefix stays byte-identical.
-			return { systemPrompt: payload.parentSystemPrompt as string };
-		}
+		if (cache.mode === "native") return; // No forced projection: preserve transcript system deltas.
 		return { systemPrompt: `${event.systemPrompt}\n\n${SIDE_PANE_INSTRUCTIONS}` };
 	});
 
@@ -243,19 +282,22 @@ async function configureChild(
 		return patchedBody;
 	});
 
-	pi.on("context", (event) => {
+	pi.on("context_with_system", (event) => {
 		if (!payload) return;
 		if (cache.mode === "native") {
 			return {
 				messages: [
 					...payload.messages,
 					buildNativeBridgeMessage(SIDE_PANE_INSTRUCTIONS),
-					...event.messages,
+					// Discard only the child's bootstrap system prefix. Later child
+					// system/tool deltas and every follow-up remain request-local.
+					...event.messages.slice(event.messages.findIndex(m => m.role !== "system") < 0
+						? event.messages.length : event.messages.findIndex(m => m.role !== "system")),
 				],
 			};
 		}
 		return {
-			messages: [buildParentContextMessage(contextDocument ?? ""), ...event.messages],
+			messages: [event.messages[0], buildParentContextMessage(contextDocument ?? ""), ...event.messages.slice(1)],
 		};
 	});
 
@@ -287,7 +329,7 @@ async function configureChild(
 			}
 			const route = parseBtwCommand(args);
 			if (route.kind === "check") {
-				ctx.ui.notify(inheritanceSummary(), "info");
+				ctx.ui.notify(inheritanceSummary(ctx), "info");
 				return;
 			}
 			if (route.kind === "help") {

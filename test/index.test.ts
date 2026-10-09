@@ -750,18 +750,18 @@ test("child uses the native prefix when model, tools, and thinking match the par
 			{ systemPrompt: "child default prompt" },
 			ctx,
 		);
-		assert.deepEqual(startResult, { systemPrompt: "parent system prompt" });
+		assert.equal(startResult, undefined);
 
 		const [contextResult] = await harness.emit(
-			"context",
-			{ messages: [{ role: "user", content: [{ type: "text", text: "side question" }], timestamp: 9 }] },
+			"context_with_system",
+			{ messages: [{ role: "system", content: "child default prompt", timestamp: 0 }, { role: "user", content: [{ type: "text", text: "side question" }], timestamp: 9 }] },
 			ctx,
 		);
 		const messages = contextResult?.messages ?? [];
 		// exact parent prefix, then the bridge suffix, then the child's own messages
 		assert.deepEqual(messages[0], store.readValue.messages[0]);
-		assert.match(messages[1]?.content?.[0]?.text ?? "", /read-only snapshot of the parent session/);
-		assert.match(messages[1]?.content?.[0]?.text ?? "", /side pane/);
+		assert.match(messages[2]?.content?.[0]?.text ?? "", /read-only snapshot of the parent session/);
+		assert.match(messages[2]?.content?.[0]?.text ?? "", /side pane/);
 		assert.equal(messages.at(-1)?.content?.[0]?.text, "side question");
 	});
 });
@@ -783,14 +783,15 @@ test("child falls back to the portable document when the prefix cannot match", a
 		assert.match(startResult?.systemPrompt ?? "", /side pane/);
 
 		const [contextResult] = await harness.emit(
-			"context",
-			{ messages: [{ role: "user", content: [{ type: "text", text: "side question" }], timestamp: 9 }] },
+			"context_with_system",
+			{ messages: [{ role: "system", content: "child default prompt", timestamp: 0 }, { role: "user", content: [{ type: "text", text: "side question" }], timestamp: 9 }] },
 			ctx,
 		);
 		const messages = contextResult?.messages ?? [];
-		assert.equal(messages.length, 2);
-		assert.match(messages[0]?.content?.[0]?.text ?? "", /read-only snapshot/);
-		assert.match(messages[0]?.content?.[0]?.text ?? "", /<parent-conversation>/);
+		assert.equal(messages.length, 3);
+		assert.equal(messages[0]?.role, "system");
+		assert.match(messages[1]?.content?.[0]?.text ?? "", /read-only snapshot/);
+		assert.match(messages[1]?.content?.[0]?.text ?? "", /<parent-conversation>/);
 	});
 });
 
@@ -1167,18 +1168,18 @@ test("child uses one English status line and reports actual sharing and header c
    Object.assign(ctx.model, { api: "openai-responses" });
    Object.assign(ctx.ui, { setWidget: (name: string, lines: string[] | undefined) => widgets.set(name, lines), setTitle: () => undefined, setEditorText: () => undefined });
    await harness.emit("session_start", { reason: "startup" }, ctx);
-   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Check pending"]);
+   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Context: pending · Check pending"]);
    for (const old of ["herdr-btw-inheritance", "herdr-btw-cache-key", "herdr-btw-session-header"]) assert.equal(widgets.get(old), undefined);
    await harness.emit("before_agent_start", { systemPrompt: "child" }, ctx);
    await harness.emit("before_provider_request", { payload: body }, ctx);
-   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Prefix matched 1/1 · Shared: key"]);
+   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Context: native · Prefix matched 1/1 · Shared: key"]);
    await harness.emit("before_provider_headers", { headers: {} }, ctx);
-   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Prefix matched 1/1 · Shared: key+header"]);
+   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Context: native · Prefix matched 1/1 · Shared: key+header"]);
    await harness.emit("before_provider_headers", { headers: { "session-id": "conflicting" } }, ctx);
-   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Prefix matched 1/1 · Shared: key · Warning: header conflict"]);
+   assert.deepEqual(widgets.get("herdr-btw-context"), ["BTW · Context: native · Prefix matched 1/1 · Shared: key · Warning: header conflict"]);
    await harness.commands.get("btw")!.handler("check", ctx);
    const detail = ctx.notifications.at(-1)!.message;
-   assert.match(detail, /Parent context: 1 messages, integrity OK/);
+   assert.match(detail, /Parent context: 2 messages, integrity OK/);
    assert.match(detail, /Warning: session-id header conflict/);
    assert.doesNotMatch(detail, /Scope:|Cache hits|[\u4e00-\u9fff]/);
    assert.equal([...widgets.values()].filter((lines) => lines !== undefined).length, 1);

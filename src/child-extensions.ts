@@ -2,23 +2,37 @@ import { access, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, parse } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DefaultPackageManager, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
+import * as hostPi from "@earendil-works/pi-coding-agent";
+
+// Pi 1.1 CLI built-ins (documented in settings.md). PackageManager defaults
+// to NONE, unlike the CLI. Keep the catalog parity covered by host tests.
+// Older hosts without the built-in codemode factory keep their old discovery.
+export const CLI_BUILTIN_EXTENSIONS = "createCodemodeExtension" in hostPi
+	? ["llama.cpp", "codemode", "tool-search", "mcp"] : [];
 
 export type ExtensionCandidate = { path: string; names: string[] };
 export type ChildExtensionOptions = {
 	cwd?: string;
+	agentDir?: string;
 	projectTrusted?: boolean;
 	warn?: (message: string) => void;
 	resolve?: () => Promise<ExtensionCandidate[]>;
 };
 
-async function discover(options: ChildExtensionOptions): Promise<ExtensionCandidate[]> {
+export async function discoverChildExtensions(options: ChildExtensionOptions): Promise<ExtensionCandidate[]> {
 	const cwd = options.cwd ?? process.cwd();
-	const agentDir = getAgentDir();
+	const agentDir = options.agentDir ?? getAgentDir();
 	const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: options.projectTrusted ?? false });
-	const manager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
+	const manager = new DefaultPackageManager({ cwd, agentDir, settingsManager,
+		builtinExtensions: CLI_BUILTIN_EXTENSIONS });
 	// Never install missing packages just to enumerate candidates.
 	const resources = await manager.resolve(async () => "skip");
 	return Promise.all(resources.extensions.filter((r) => r.enabled).map(async (r) => {
+		// Built-ins are virtual CLI selectors, not filesystem paths. Preserve
+		// the identity and let the resolver honor disabled/project resources.
+		if (r.path.startsWith("builtin:")) {
+			return { path: r.path, names: [r.path, r.path.slice("builtin:".length)] };
+		}
 		const names = [r.metadata.source, basename(r.path).replace(/\.(?:[cm]?js|ts)$/, "")];
 		if (names.includes("index")) names.push(basename(dirname(r.path)));
 		if (r.metadata.origin === "package") {
@@ -68,7 +82,7 @@ export async function loadChildExtensions(
 		throw new Error("/btw invalid extension policy: expected mode, allowlist, denylist and onMissing");
 	}
 	if (mode === "inherit") return undefined;
-	const candidates = await (options.resolve ?? (() => discover(options)))();
+	const candidates = await (options.resolve ?? (() => discoverChildExtensions(options)))();
 	const self = await realpath(selfPath);
 	const selectors = (mode === "allowlist" ? allowlist : denylist) as string[];
 	const matched = new Set<string>();

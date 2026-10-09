@@ -18,6 +18,7 @@ export function fixturePayloadOptions(
 		parentActiveTools: ["read", "bash"],
 		parentThinkingLevel: "high",
 		messages: [
+			{ role: "system", content: "parent system prompt", timestamp: 0 },
 			{
 				role: "user",
 				content: [{ type: "text", text: "parent question" }],

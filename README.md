@@ -1,5 +1,7 @@
 > **Custom fork:** Maintained on the `custom` branch. Install with
 > `pi install git:github.com/yitan1/pi-herdr-btw@v0.3.1-custom.1`.
+> That pinned tag predates the Pi 1.1 fixes. The current `custom` branch requires
+> Pi >=1.1.0; install it with `pi install git:github.com/yitan1/pi-herdr-btw@custom`.
 > Adds `/btw1` and `/btw2` opt-in cache-sharing experiments.
 > See [LOCAL_PATCH.md](LOCAL_PATCH.md) for behavior, migration and maintenance.
 > The upstream README follows; its npm install command installs upstream, not this fork.
@@ -166,10 +168,10 @@ not send additional API requests.
 The status widget is a single English line, for example:
 
 ```text
-BTW · Check pending
-BTW · Prefix matched 38/38 · Shared: key+header
-BTW · Mismatch: tools
-BTW · Unverified: no parent baseline
+BTW · Context: pending · Check pending
+BTW · Context: native · Prefix matched 38/38 · Shared: key+header
+BTW · Context: native · Mismatch: tools
+BTW · Context: native · Unverified: no parent baseline
 ```
 
 Sharing markers reflect applied request hints, not merely saved preferences.

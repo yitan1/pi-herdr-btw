@@ -24,7 +24,13 @@ credentials, request logs or session files belong in this repository.
 
 ## Install the same release on every machine
 
-Requires Pi >=0.85.1 and Node >=22.19.0.
+The current `custom` branch requires Pi >=1.1.0 and Node >=22.19.0.
+The older pinned release below predates the Pi 1.1 replay fixes. To install
+the reviewed branch instead (not an immutable release):
+
+```sh
+pi install git:github.com/yitan1/pi-herdr-btw@custom
+```
 
 ```sh
 pi install git:github.com/yitan1/pi-herdr-btw@v0.3.1-custom.1
@@ -116,3 +122,100 @@ the first supported request against the parent baseline. `/btw check` is local.
 No final-hook ordering guarantee is assumed; the README documents BTW's
 observation point. The diagnostic does not mutate provider bodies or cache policy.
 See README limitations before interpreting a match as a cache-hit guarantee.
+
+## Local Pi 1.1.0 replay fix (2026-10-09)
+
+Native replay now owns `context_with_system`, preserves the full parent transcript
+(including system deltas), and does not return a forced `systemPrompt`. Pi 1.1.0
+restores system state after `context` and projects forced prompts after extension
+context transforms; the old combination duplicated/collapsed system state.
+Only the child's initial consecutive system messages are replaced by the parent
+prefix. The side-pane bridge and all child turns, including later child system
+deltas, remain in the request. Injection is request-local, not session storage,
+so merge still packages only the child's own text turns.
+
+Before the first run only, `tools: inherit` restores the parent's ordered active
+loadout if every requested name is registered and not hidden. It never attempts
+partial activation, never retries on later turns, and checks the actual resulting
+loadout before permitting native mode. Overrides, missing tools, mismatches,
+missing parent prompt and legacy conversation-only payloads retain reference
+fallback. `/btw check` shows concrete mode/reason, model/thinking, ordered tools,
+missing/extra active names and restoration status without showing parent content,
+session IDs, capabilities or request bodies. A pre-run check is read-only.
+
+Context mode, first-request prefix comparison at BTW's hook, and sharing hints
+are separate observations. No one of them establishes a cache hit. Existing
+sharing API gates, conflict detection and kill switch remain intact. Other
+extensions can still modify the transcript/loadout or force a prompt after BTW;
+providers may collapse system deltas depending on API support. No final wire or
+live provider cache behavior was tested.
+
+Offline host tests (use development dependencies or an installed Pi >=1.1.0):
+
+```sh
+npm run test:local
+# Explicit host override:
+PI_TEST_HOST=/path/to/installed/pi-coding-agent npm run test:local
+```
+
+The Node harness resolves the development host first, then npm's global package
+directory, or uses an explicit `PI_TEST_HOST` override. It uses that host's jiti
+and aliases its Pi entry point.
+It exercises mocked extension APIs plus the actual Pi 1.1.0 ExtensionRunner
+context dispatch and AgentSession forced-prompt projection without constructing
+sessions, reading credentials, starting providers or creating panes. The `test`/`typecheck` scripts require development dependencies. `npm run check`
+runs typechecking, the TypeScript suite, and these host tests. Host peer minimums,
+development dependencies and the lockfile now target Pi 1.1.0.
+
+## Pi 1.1 built-in discovery fix (2026-10-09)
+
+Inactive registered web tools are not necessarily hidden.
+For example, pi-web-access 0.37.0 registers enabled tools normally, then its
+`session_start` activation policy makes them inactive in a fresh dynamic session.
+BTW's atomic restoration stopped at the missing `codemode`, leaving these tools
+inactive as well. There is no activation event on that installed package's event
+bus. `web_enable` is its loader tool; it uses Pi's `setActiveTools()` and enables
+**every configured capability**. BTW must not run it automatically, since that
+could exceed the parent's active subset. Registered non-hidden tools can instead
+be selected by the existing supported Pi API with the exact ordered parent list.
+Hidden or unavailable tools continue to block restoration without partial changes.
+Diagnostics now distinguish unregistered from hidden and report exact restoration.
+
+Named extension policies now give PackageManager the documented Pi 1.1 CLI
+built-in catalog, so enabled `builtin:codemode` and the other built-ins survive a
+named denylist's `--no-extensions`. Virtual builtin paths are not passed to
+filesystem realpath. Selectors accept `builtin:codemode` or `codemode`; disabled
+resources and explicit policy exclusions remain excluded. Legacy path arrays
+remain strict filesystem-only lists. No settings or machine policy was changed.
+
+The catalog is guarded by availability of the public codemode factory and tested
+against this installed CLI's actual factory catalog. Future hosts that change
+that catalog need review; this is not arbitrary-version builtin enumeration.
+`PI_TEST_WEB` can point to an installed pi-web-access `tool-activation.ts`
+for the optional web integration test; without it that test is explicitly skipped.
+The added tests exercise actual package discovery and resource loading with CLI
+built-ins, actual CLI argument parsing, disabled builtin resources, the auto-name
+denylist, installed web activation/session-start and `web_enable` behavior, exact
+subset restoration and hidden-tool rejection. No models, panes, network queries,
+or MCP connections are started. Discovery tests use temporary synthetic settings,
+not personal package preferences.
+
+The first before-agent hook is still only BTW's observation point. A later
+extension can change the loadout; notably web-access may re-add `web_enable` when
+its fresh-session policy selected it but a parent snapshot omitted it. Such
+cases cannot be promised an exact final request prefix by this patch. No live
+provider cache behavior was tested. Reload the parent and create a new child to
+use the fix; existing children retain their loaded code and resource set.
+
+## Recommended inheritance strategy
+
+Prefer `mode: "inherit"` (or no extension policy file) to retain normal host
+discovery and its built-ins. Extensions that should not act in side threads
+should guard their own hooks using `PI_HERDR_BTW_PAYLOAD`, rather than relying
+on a machine-specific denylist that may drift from the parent loadout. Such
+per-machine extension edits and global settings do not belong in this package.
+Named filtering remains available when deliberate child isolation is needed;
+excluded or hidden parent tools correctly force reference fallback.
+
+The existing `v0.3.1-custom.1` tag is unchanged; these fixes are branch commits,
+not a new tagged release. Reload the parent and launch a new child after updating.
