@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 // Resolve a local development host first, then npm's global installation.
 // No installation, credentials, sessions, providers or panes. An explicit override is authoritative.
 function resolveHost() {
  if (process.env.PI_TEST_HOST) return resolve(process.env.PI_TEST_HOST);
- const localRequire = createRequire(import.meta.url);
- try { return resolve(dirname(localRequire.resolve('@earendil-works/pi-coding-agent')), '..'); }
+ // Pi exports its entry point for ESM import, not CommonJS require.
+ try { return resolve(dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))), '..'); }
  catch {
   try {
    const globalRoot = execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['root', '-g'], { encoding: 'utf8' }).trim();
@@ -199,3 +199,26 @@ test('hidden tools never activated even when every other parent tool is register
  s.run('before_agent_start', { systemPrompt: 'child' }); assert.equal(s.sets(), 0);
  await s.check(); assert.match(s.notes[0], /blocked: hidden \[bash\]/);
 });
+
+test('session_start early restore and bootstrap guard protect parent tools from being stripped by extensions', async () => {
+ const p = payload();
+ p.parentActiveTools = ['read', 'bash', 'web_search', 'fetch_content', 'web_enable'];
+ const registered = ['read', 'bash', 'web_search', 'fetch_content', 'web_enable'];
+ const s = await setup(p, p.parentActiveTools, registered);
+ // Simulate session_start lifecycle
+ s.run('session_start');
+ assert.deepEqual(s.pi.getActiveTools(), p.parentActiveTools);
+ // External extension (e.g. pi-web-access auto mode) attempts to strip web tools during session_start
+ s.pi.setActiveTools(['read', 'bash', 'web_enable']);
+ // Bootstrap guard enforces parent active tools loadout
+ assert.deepEqual(s.pi.getActiveTools(), p.parentActiveTools);
+ // When before_agent_start runs, loadout is already matched: no mid-run tool delta
+ assert.equal(s.run('before_agent_start', { systemPrompt: 'child' }), undefined);
+ assert.deepEqual(s.pi.getActiveTools(), p.parentActiveTools);
+ await s.check();
+ assert.match(s.notes[0], /restore: already matched/);
+ // Once first run starts, normal tool changes are permitted
+ s.pi.setActiveTools(['read']);
+ assert.deepEqual(s.pi.getActiveTools(), ['read']);
+});
+

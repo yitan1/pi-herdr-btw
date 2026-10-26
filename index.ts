@@ -170,6 +170,83 @@ async function configureChild(
 		for (const name of ["herdr-btw-inheritance", "herdr-btw-cache-key", "herdr-btw-session-header"]) ui.setWidget(name, undefined);
 	}
 
+	function canInheritTools(): boolean {
+		if (!payload || payload.config.tools !== "inherit") return false;
+		if (typeof pi.getAllTools !== "function") return true;
+		const registered = pi.getAllTools();
+		return payload.parentActiveTools.every(name =>
+			registered.some(t => t.name === name && t.exposure !== "hidden")
+		);
+	}
+
+	function restoreTools(phase: "session_start" | "before_agent_start"): void {
+		if (!payload) return;
+		if (payload.config.tools !== "inherit") {
+			if (toolRestore === "not attempted") toolRestore = "disabled by config";
+			return;
+		}
+		if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") {
+			return;
+		}
+		if (sameStringArray(pi.getActiveTools(), payload.parentActiveTools)) {
+			if (toolRestore === "not attempted") {
+				toolRestore = "already matched";
+			}
+			return;
+		}
+		const registered = typeof pi.getAllTools === "function" ? pi.getAllTools() : [];
+		const missing = payload.parentActiveTools.filter(name => !registered.some(t => t.name === name && t.exposure !== "hidden"));
+		if (missing.length) {
+			const unregistered = missing.filter(name => !registered.some(t => t.name === name));
+			const hidden = missing.filter(name => registered.some(t => t.name === name && t.exposure === "hidden"));
+			toolRestore = `blocked: ${[
+				unregistered.length ? `unregistered [${unregistered.join(", ")}]` : "",
+				hidden.length ? `hidden [${hidden.join(", ")}]` : "",
+			].filter(Boolean).join("; ")}`;
+			return;
+		}
+		try {
+			pi.setActiveTools(payload.parentActiveTools);
+			toolRestore = sameStringArray(pi.getActiveTools(), payload.parentActiveTools)
+				? "restored exact parent loadout" : "attempted; resulting loadout differs";
+		} catch {
+			toolRestore = "failed";
+		}
+	}
+
+	let unpatchAgentSession: (() => void) | undefined;
+	if (payload?.config.tools === "inherit") {
+		try {
+			const mod = await import("@earendil-works/pi-coding-agent").catch(() => undefined);
+			const proto = (mod as any)?.AgentSession?.prototype;
+			if (proto && typeof proto.setActiveToolsByName === "function") {
+				const original = proto.setActiveToolsByName;
+				proto.setActiveToolsByName = function (this: any, toolNames: string[]) {
+					if (firstRun && canInheritTools()) {
+						return original.call(this, payload!.parentActiveTools);
+					}
+					return original.call(this, toolNames);
+				};
+				unpatchAgentSession = () => {
+					if (proto.setActiveToolsByName === original) return;
+					proto.setActiveToolsByName = original;
+				};
+			}
+		} catch {
+			// Module resolution or environment without pi-coding-agent
+		}
+
+		if (typeof pi.setActiveTools === "function") {
+			const originalPiSetActiveTools = pi.setActiveTools.bind(pi);
+			pi.setActiveTools = (names: string[]) => {
+				if (firstRun && canInheritTools()) {
+					return originalPiSetActiveTools(payload!.parentActiveTools);
+				}
+				return originalPiSetActiveTools(names);
+			};
+		}
+	}
+
 	pi.on("before_agent_start", (event, ctx) => {
 		if (!payload) return;
 		sharedKey = false;
@@ -179,29 +256,8 @@ async function configureChild(
 		// Only the first run may restore inheritance; never activate absent/hidden tools.
 		if (firstRun) {
 			firstRun = false;
-			if (payload.config.tools === "inherit" && !sameStringArray(pi.getActiveTools(), payload.parentActiveTools)) {
-				const registered = pi.getAllTools();
-				const missing = payload.parentActiveTools.filter(name => !registered.some(t => t.name === name && t.exposure !== "hidden"));
-				if (missing.length) {
-					const unregistered = missing.filter(name => !registered.some(t => t.name === name));
-					const hidden = missing.filter(name => registered.some(t => t.name === name && t.exposure === "hidden"));
-					toolRestore = `blocked: ${[
-						unregistered.length ? `unregistered [${unregistered.join(", ")}]` : "",
-						hidden.length ? `hidden [${hidden.join(", ")}]` : "",
-					].filter(Boolean).join("; ")}`;
-				}
-				else {
-					// Registered inactive direct tools (including pi-web-access) are
-					// selectable through Pi's supported API. Do not run web_enable:
-					// it adds ALL configured capabilities, not the parent's subset.
-					try {
-						pi.setActiveTools(payload.parentActiveTools);
-						toolRestore = sameStringArray(pi.getActiveTools(), payload.parentActiveTools)
-							? "restored exact parent loadout" : "attempted; resulting loadout differs";
-					}
-					catch { toolRestore = "failed"; }
-				}
-			} else toolRestore = payload.config.tools === "inherit" ? "already matched" : "disabled by config";
+			unpatchAgentSession?.();
+			restoreTools("before_agent_start");
 		}
 		actual = {
 			model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
@@ -444,6 +500,7 @@ async function configureChild(
 	});
 
 	pi.on("session_start", (event, ctx) => {
+		restoreTools("session_start");
 		if (ctx.mode !== "tui") return;
 		ctx.ui.setTitle("pi /btw — Herdr side thread");
 
@@ -470,6 +527,7 @@ async function configureChild(
 	});
 
 	pi.on("session_shutdown", async (event) => {
+		unpatchAgentSession?.();
 		if (ackTimer) {
 			clearInterval(ackTimer);
 			ackTimer = undefined;
